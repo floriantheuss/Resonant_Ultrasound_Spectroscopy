@@ -1,8 +1,9 @@
 import numpy as np
 from scipy import linalg as LA
+from time import time
 
 # highest order polynomial
-order = 16
+order = 3
 
 # mass in kg
 m = 0.045e-3
@@ -35,7 +36,6 @@ c66 = c44
 
 
 ctens = np.zeros([3,3,3,3])
-# this is not done yet - I have to symmetrize and all
 ctens[0,0,0,0] = c11
 ctens[1,1,1,1] = c22
 ctens[2,2,2,2] = c33
@@ -178,6 +178,7 @@ def integrateGradBasis (b1, b2, d1, d2, Lx, Ly, Lz):
 # create a dictionary to store the result of all relevant integrals of the derivatives of two basis functions
 # this is done because when fitting elastic constants, this has to be done only once, since it is independent of the elastic tensor
 integratedGradBasis = {}
+integratedGradBasis = np.zeros([R, 3, R, 3])
 basisTotal = 0
 for bN in np.arange(8): # this is for the different quadrants (see paper by Albert for details)
     for i in np.arange(int(basisPop[bN])):
@@ -186,7 +187,8 @@ for bN in np.arange(8): # this is for the different quadrants (see paper by Albe
             b2 = basisfunctions[basisTotal+j]
             for k in np.arange(3):
                 for l in np.arange(3):
-                    integratedGradBasis[(basisTotal+i, basisTotal+j, k, l)] = integrateGradBasis (b1, b2, k, l, Lx, Ly, Lz)
+                    # integratedGradBasis[(basisTotal+i, basisTotal+j, k, l)] = integrateGradBasis (b1, b2, k, l, Lx, Ly, Lz)
+                    integratedGradBasis[basisTotal+i, k, basisTotal+j, l] = integrateGradBasis (b1, b2, k, l, Lx, Ly, Lz)
     basisTotal = basisTotal + int(basisPop[bN])
 
 
@@ -201,7 +203,8 @@ for bN in np.arange(8): # this is for the different quadrants (see paper by Albe
             temporarySum = 0
             for k in np.arange(3):
                 for l in np.arange(3):
-                    temporarySum = temporarySum + ctens[int(b1[0]), k, int(b2[0]), l] * integratedGradBasis[(basisTotal+i, basisTotal+j, k, l)] #integrateGradBasis (b1, b2, k, l, Lx, Ly, Lz)
+                    # temporarySum = temporarySum + ctens[int(b1[0]), k, int(b2[0]), l] * integratedGradBasis[(basisTotal+i, basisTotal+j, k, l)] #integrateGradBasis (b1, b2, k, l, Lx, Ly, Lz)
+                    temporarySum = temporarySum + ctens[int(b1[0]), k, int(b2[0]), l] * integratedGradBasis[basisTotal+i, k, basisTotal+j, l] #integrateGradBasis (b1, b2, k, l, Lx, Ly, Lz)
             Gmat[basisTotal+i, basisTotal+j] = temporarySum
             Gmat[basisTotal+j, basisTotal+i] = Gmat[basisTotal+i, basisTotal+j]
     basisTotal = basisTotal + int(basisPop[bN])
@@ -209,8 +212,9 @@ for bN in np.arange(8): # this is for the different quadrants (see paper by Albe
 
 # print (Gmat[0])
 # print (Emat[0])
-
+t1 = time()
 w = LA.eigh(Gmat, Emat, eigvals_only= True)
+print (time()-t1)
 
 # blocks = basisPop
 # H = []
