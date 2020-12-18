@@ -43,8 +43,7 @@ class ElasticSolid:
         for k in range(self.order+1):
             for l in range(self.order+1):
                 for m in range(self.order+1):
-                    if k+l+m > self.order: continue
-                    else:
+                    if k+l+m <= self.order:
                         self.basis[self.idx] = np.array([k,l,m])
                         for ii in range(3):
                             self.block[lookUp[tuple((-1,-1,-1)**(self.basis[self.idx] + np.roll([1,0,0], ii)))]].append(ii*self.N + self.idx)
@@ -125,9 +124,9 @@ class ElasticSolid:
     def E_mat (self):
         Etens = np.zeros((3,self.idx,3,self.idx), dtype= np.double)
         for x in range(3*self.idx):
-            i, k = x%3, x%self.idx
+            i, k = int(x/self.idx), x%self.idx
             for y in range(x, 3*self.idx):
-                j, l = y%3, y%self.idx
+                j, l = int(y/self.idx), y%self.idx
                 if i==j: Etens[i,k,j,l]=Etens[j,l,i,k]=self.E_int(k,l)*self.rho
         
         Emat = Etens.reshape(3*self.idx,3*self.idx)
@@ -136,9 +135,9 @@ class ElasticSolid:
     def I_tens (self):
         Itens = np.zeros((3,self.idx,3,self.idx), dtype= np.double)
         for x in range(3*self.idx):
-            i, k = x%3, x%self.idx
+            i, k = int(x/self.idx), x%self.idx
             for y in range(x, 3*self.idx):
-                j, l = y%3, y%self.idx
+                j, l = int(y/self.idx), y%self.idx
                 Itens[i,k,j,l]=Itens[j,l,i,k]=self.G_int(k,l,i,j)
         return Itens
 
