@@ -44,17 +44,6 @@ Bulk = ( A1g1 * A1g2 - A1g3**2 ) / ( A1g1 + A1g2 - 2*A1g3 )
 dBulk = np.sqrt( ((A1g2-A1g3)**2*dA1g1)**2 + ((A1g1-A1g3)**2*dA1g2)**2 + (2*(A1g1-A1g3)*(A1g2-A1g3)*dA1g3)**2 ) / (A1g1+A1g2-2*A1g3)**2
 
 
-# define the critical divergence
-def crit (p, T):
-    Tc, aminus, aplus, alpha, b, c, d = p
-    tm = (Tc-T[T<=Tc])/Tc
-    C1 = aminus * tm**(-alpha) 
-    tp = (T[T>Tc]-Tc)/Tc
-    C2 = aplus * tp**(-alpha)
-    C = np.append(C1, C2) + b + c*T + d*T**2
-    return C
-
-
 # includes higher order terms
 def crit_more (p, T):
     Tc, alpha, delta, Am, Ap, Bm, Bp, C, D, E  = p
