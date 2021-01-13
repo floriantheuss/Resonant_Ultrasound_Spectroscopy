@@ -3,6 +3,7 @@ from scipy import linalg as LA
 from time import time
 from copy import deepcopy
 from lmfit import minimize, Parameters, report_fit
+import matplotlib.pyplot as plt
 
 class ElasticSolid:
 
@@ -147,7 +148,10 @@ class ElasticSolid:
         Gmat = np.swapaxes(Gtens, 2, 1).reshape(3*self.idx, 3*self.idx)
         return Gmat
 
-    def resonance_frequencies (self, pars=None):
+    def resonance_frequencies (self, pars=None, nb_freq=None):
+        if nb_freq==None:
+            nb_freq = self.nb_freq
+
         t1 = time()        
         if pars is None:
             pars = self.elasticConstants_dict
@@ -155,9 +159,41 @@ class ElasticSolid:
         w = np.array([])
         for ii in range(8): 
             w = np.concatenate((w, LA.eigh(Gmat[np.ix_(self.block[ii], self.block[ii])], self.Emat[np.ix_(self.block[ii], self.block[ii])], eigvals_only=True)))
-        f = np.sqrt(np.absolute(np.sort(w))[6:self.nb_freq+6])/(2*np.pi)/1e6
+        f = np.sqrt(np.absolute(np.sort(w))[6:nb_freq+6])/(2*np.pi)/1e6
         print ('solving for the resonance frequencies took ', time()-t1, ' s')
         return f
+
+
+    def log_derivative (self, el_const, direction_of_derivative, h=1e-16**(1/3)):
+        
+        for key in el_const:
+            el_const[key] = el_const[key]
+
+        freq = self.resonance_frequencies(el_const)
+        c_over_f = el_const[direction_of_derivative] / freq
+
+        el_const[direction_of_derivative] = el_const[direction_of_derivative] + 2*h
+        derivative = -self.resonance_frequencies(el_const)
+
+        el_const[direction_of_derivative] = el_const[direction_of_derivative] - h
+        derivative = derivative + 8 * self.resonance_frequencies(el_const)
+
+        el_const[direction_of_derivative] = el_const[direction_of_derivative] - 2*h
+        derivative = derivative - 8 * self.resonance_frequencies(el_const)
+
+        el_const[direction_of_derivative] = el_const[direction_of_derivative] - h
+        derivative = derivative + self.resonance_frequencies(el_const)
+
+        derivative = derivative / (12*h)
+
+        log_der = derivative * c_over_f
+
+        return (log_der)
+
+
+
+        
+
 
 
 
@@ -166,7 +202,7 @@ class ElasticSolid:
 
 if __name__ == '__main__':
 
-    order = 3
+    order = 12
     mass = 0.045e-3
     dimensions = np.array([0.145e-2, 0.201e-2, 0.302e-2])
 
@@ -182,3 +218,19 @@ if __name__ == '__main__':
 
     f = srtio3.resonance_frequencies()
     print(f)
+
+    log_der = []
+    for key in initElasticConstants_dict:
+        log_der.append(srtio3.log_derivative(initElasticConstants_dict, key, h=1e-15))
+    print (log_der)
+    log_der_t = np.transpose(np.array(log_der))
+    sums = [sum(ld) for ld in log_der_t]
+    
+    plt.figure()
+    plt.plot(np.arange(len(sums)), sums, 'o')
+
+    plt.figure()
+    for ld in log_der:
+        plt.plot ( np.arange(len(ld)), ld, 'o' )
+
+    plt.show()
