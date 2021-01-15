@@ -12,7 +12,7 @@ save_path = 'C:\\Users\\Florian\\Box Sync\\Projects\\Mn3Ge\\RUS\\Mn3Ge_2001B\\Mn
 
 elastic_constant_to_fit = 'Bulk'
 include_errors = False
-fit_algorithm = 'lmfit' #options are 'lmfit' or 'odr'
+fit_algorithm = 'odr' #options are 'lmfit' or 'odr'
 
 initial_conditions = {
     'Tc': {'initial_value':369.9, 'bounds':[368, 371], 'vary':True},

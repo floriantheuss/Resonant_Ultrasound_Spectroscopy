@@ -295,11 +295,14 @@ class CriticalExponentFit:
                 'D': {'value':popt[8], 'stderr':perr[8]}
             }
         
+        
         for key, item in self.results.items():
             if item['value'] !=0:
-                print (key, ': ', item, '    ', item['stderr']/item['value']*100, '% relative error')
+                f = '{0:>5} = {1:>9} +/- {2:>8}      ({3} % relative error)'
+                print (f.format(key, round(item['value'],4), round(item['stderr'],4),  round(item['stderr']/item['value']*100, 2)))
             else:
-                print (key, ': ', item)
+                f = '{0:>5} = {1:>9} +/- {2:>8}'
+                print (f.format(key, round(item['value'],4), round(item['stderr'],4)))
         return self.results
 
     
