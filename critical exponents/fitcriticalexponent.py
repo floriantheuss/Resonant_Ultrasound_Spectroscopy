@@ -8,6 +8,13 @@ import json
 class CriticalExponentFit:
 
     def __init__ (self, filepath, initial_conditions, fit_ranges, type_of_elastic_constant, include_error_bars):
+        """
+        fileapath: location of text file containing irreducible elastic constants with errors
+        initial_conditions: dictionary giving initial conditions, boundaries, and True/False if parameter is supposed to be fitted/kept fixed
+        fit_ranges: dictionary of two fit ranges; one for the background fit and another one for fit of critical exponent
+        type_of_elastic_constant: which elastic constant do you want to fit? Options are 'Bulk' for bulk modulus or 'E2g'
+        include_error_bars: do you want to include error bars of the elastic constants in your fit (True/False)
+        """
         self.filepath = filepath
         self.initial_conditions = initial_conditions
         self.fit_ranges = fit_ranges
@@ -32,7 +39,9 @@ class CriticalExponentFit:
 
 
     def import_data (self):
-        ## import data <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+        """
+        import the data and select the right combination of elastic constants for future fit
+        """
         data = []
         f = open(self.filepath, 'r')
 
@@ -52,12 +61,12 @@ class CriticalExponentFit:
         A1g1 = data[1]
         A1g2 = data[2]
         A1g3 = data[3]
-        E1g = data[4]
+        # E1g = data[4]
         E2g = data[5]
         dA1g1 = data[6]
         dA1g2 = data[7]
         dA1g3 = data[8]
-        dE1g = data[9]
+        # dE1g = data[9]
         dE2g = data[10]
         Bulk = ( A1g1 * A1g2 - A1g3**2 ) / ( A1g1 + A1g2 - 2*A1g3 )
         dBulk = np.sqrt( ((A1g2-A1g3)**2*dA1g1)**2 + ((A1g1-A1g3)**2*dA1g2)**2 + (2*(A1g1-A1g3)*(A1g2-A1g3)*dA1g3)**2 ) / (A1g1+A1g2-2*A1g3)**2
@@ -73,11 +82,18 @@ class CriticalExponentFit:
             print ('give a different type of elastic constant to fit')
         return 0
 
-    def line (self, p, T): # define straight line for background estimation
+    def line (self, p, T):
+        """
+        define a straight line for background estimation
+        """
         A, B = p
         return A+B*T
 
     def fit_background (self):
+        """
+        fit a straight line to selected parts of the data (the part is selected in the dictionary fit_ranges);
+        the results of this fit are put into the initial_conditions dictionary used for the fit of critical exponents
+        """
         self.bkg_mask = ( (self.T>self.fit_ranges['background']['Tmin']) & (self.T<self.fit_ranges['background']['Tmax']) )
         # actually run the fitting routine for the linear background above Tmin
         bpdata = odr.RealData(self.T[self.bkg_mask], self.elastic_constant[self.bkg_mask])
@@ -94,7 +110,11 @@ class CriticalExponentFit:
         self.params['D'] = Parameter(name='D', value=poptbg[1], vary='True', min=poptbg[1]/100, max=poptbg[1]*100)
         return 0
 
-    def residual_function (self, params):
+
+    def simulated_elastic_constant (self, params):
+        """
+        calculate the divergence of the elastic constant, i.e. t^(-alpha) and other parts for lmfit
+        """
         if self.type == 'E2g':
             Tmin = self.fit_ranges['critical_exponent']['Tmin']
             Tmax = self.fit_ranges['critical_exponent']['Tmax']
@@ -111,9 +131,8 @@ class CriticalExponentFit:
             Tmasked = self.T[self.exponent_mask]
             t = (Tmasked-Tc)/Tc
             prediction = A * t**(-alpha) * ( 1 + B * t**delta) + C + D*Tmasked
-            delta = prediction - self.elastic_constant[self.exponent_mask]
-
-        if self.type == 'Bulk':
+            
+        elif self.type == 'Bulk':
             T1 = self.fit_ranges['critical_exponent']['T1']
             T2 = self.fit_ranges['critical_exponent']['T2']
             T3 = self.fit_ranges['critical_exponent']['T3']
@@ -135,19 +154,34 @@ class CriticalExponentFit:
             C1 = Am * tm**(-alpha) * ( 1 + Bm * tm**delta)
             C2 = Ap * tp**(-alpha) * ( 1 + Bp * tp**delta)
             prediction = np.append(C1, C2) + C + D*Tmasked
-            delta = prediction - self.elastic_constant[self.exponent_mask]
-    
+        
+        else:
+            print ('You have not defined a viable elastic constant to fit to')
+        return (prediction)
+        
+            
+
+
+    def residual_function (self, params):
+        """
+        define the residual function used in lmfit;
+        i.e. (simulated_elastic_constant - data)
+        """
+        prediction = self.simulated_elastic_constant (params)
+        delta = prediction - self.elastic_constant[self.exponent_mask]
+
         if self.include_errors == True:
             errorbars = self.error
+            if np.any(errorbars[self.exponent_mask]<1e-6) == True:
+                print('There are errors smaller than 1e-6. They are set to 1e-6 in the fit.')
             for i in np.arange(len(errorbars)):
-                # errorbars[i] = 1e-6
                 if errorbars[i] < 1e-6:
                     errorbars[i] = 1e-6
-            # errorbars = errorbars / min(errorbars)
             return delta / errorbars[self.exponent_mask]
         else:
             return delta
 
+        
 
     def run_fit (self):
 
@@ -161,6 +195,109 @@ class CriticalExponentFit:
 
         return self.results
 
+
+    
+    def odr_fit_function (self, p, T):
+        """
+        define fit function for scipy.odr fit
+        """
+        if self.type == 'E2g':
+            Tc, alpha, delta, A, B, C, D = p
+            t = (T-Tc)/Tc
+            prediction = A * t**(-alpha) * ( 1 + B * t**delta) + C + D*T
+
+        elif self.type == 'Bulk':
+            Tc, alpha, delta, Am, Bm, Ap, Bp, C, D = p
+            tm = (Tc-T[T<=Tc])/Tc
+            tp = (T[T>Tc]-Tc)/Tc
+            C1 = Am * tm**(-alpha) * ( 1 + Bm * tm**delta)
+            C2 = Ap * tp**(-alpha) * ( 1 + Bp * tp**delta)
+            prediction = np.append(C1, C2) + C + D*T
+        
+        else:
+            print ('You have not defined a viable elastic constant to fit to')
+        return (prediction)
+
+
+    
+    def run_odr_fit (self):
+        """
+        run a fit for a critical exponent with scipy.odr instead of lmfit
+        (one of the advantages here is that y-errors and x-erros can be included)
+        """
+
+        if self.type == 'E2g':
+            Tmin = self.fit_ranges['critical_exponent']['Tmin']
+            Tmax = self.fit_ranges['critical_exponent']['Tmax']
+            self.exponent_mask = ( (self.T>Tmin) & (self.T<Tmax) )  
+            initial_guess = [self.initial_conditions['Tc']['initial_value'], self.initial_conditions['alpha']['initial_value'], self.initial_conditions['delta']['initial_value'], self.initial_conditions['A']['initial_value'], self.initial_conditions['B']['initial_value'], self.initial_conditions['C']['initial_value'], self.initial_conditions['D']['initial_value']]
+            fix = [self.initial_conditions['Tc']['vary'], self.initial_conditions['alpha']['vary'], self.initial_conditions['delta']['vary'], self.initial_conditions['A']['vary'], self.initial_conditions['B']['vary'], self.initial_conditions['C']['vary'], self.initial_conditions['D']['vary']]
+        elif self.type == 'Bulk':
+            T1 = self.fit_ranges['critical_exponent']['T1']
+            T2 = self.fit_ranges['critical_exponent']['T2']
+            T3 = self.fit_ranges['critical_exponent']['T3']
+            T4 = self.fit_ranges['critical_exponent']['T4']
+            self.exponent_mask = ((self.T>T1) & (self.T<T2)) | ((self.T>T3) & (self.T<T4))
+            initial_guess = [self.initial_conditions['Tc']['initial_value'], self.initial_conditions['alpha']['initial_value'], self.initial_conditions['delta']['initial_value'], self.initial_conditions['Am']['initial_value'], self.initial_conditions['Bm']['initial_value'], self.initial_conditions['Ap']['initial_value'], self.initial_conditions['Bp']['initial_value'], self.initial_conditions['C']['initial_value'], self.initial_conditions['D']['initial_value']]
+            fix = [self.initial_conditions['Tc']['vary'], self.initial_conditions['alpha']['vary'], self.initial_conditions['delta']['vary'], self.initial_conditions['Am']['vary'], self.initial_conditions['Bm']['vary'], self.initial_conditions['Ap']['vary'], self.initial_conditions['Bp']['vary'], self.initial_conditions['C']['vary'], self.initial_conditions['D']['vary']]
+        else:
+            print ('You have not define a viable elastic constant to fit to')
+        
+
+        if self.include_errors == True:
+            errorbars = self.error
+            if np.any(errorbars[self.exponent_mask]<1e-6) == True:
+                print('There are errors smaller than 1e-6. They are set to 1e-6 in the fit.')
+            for i in np.arange(len(errorbars)):
+                if errorbars[i] < 1e-6:
+                    errorbars[i] = 1e-6
+            data = odr.RealData(self.T[self.exponent_mask], self.elastic_constant[self.exponent_mask], sy=errorbars[self.exponent_mask])
+        else:
+            data = odr.RealData(self.T[self.exponent_mask], self.elastic_constant[self.exponent_mask])
+        fix_new = []
+        for i in fix:
+            if i == True:
+                fix_new.append(1)
+            else:
+                fix_new.append(0)
+        model = odr.Model(self.odr_fit_function)
+        fit = odr.ODR(data, model, beta0=initial_guess, ifixb=fix_new)
+        out = fit.run()
+        popt = out.beta
+        perr = out.sd_beta
+        
+        if self.type == 'E2g':
+            self.results = {
+                'Tc': {'value':popt[0], 'stderr':perr[0]},
+                'alpha': {'value':popt[1], 'stderr':perr[1]},
+                'delta': {'value':popt[2], 'stderr':perr[2]},
+                'A': {'value':popt[3], 'stderr':perr[3]},
+                'B': {'value':popt[4], 'stderr':perr[4]},
+                'C': {'value':popt[5], 'stderr':perr[5]},
+                'D': {'value':popt[6], 'stderr':perr[6]}
+            }
+        elif self.type == 'Bulk':
+            self.results = {
+                'Tc': {'value':popt[0], 'stderr':perr[0]},
+                'alpha': {'value':popt[1], 'stderr':perr[1]},
+                'delta': {'value':popt[2], 'stderr':perr[2]},
+                'Am': {'value':popt[3], 'stderr':perr[3]},
+                'Bm': {'value':popt[4], 'stderr':perr[4]},
+                'Ap': {'value':popt[5], 'stderr':perr[5]},
+                'Bp': {'value':popt[6], 'stderr':perr[6]},
+                'C': {'value':popt[7], 'stderr':perr[7]},
+                'D': {'value':popt[8], 'stderr':perr[8]}
+            }
+        
+        for key, item in self.results.items():
+            if item['value'] !=0:
+                print (key, ': ', item, '    ', item['stderr']/item['value']*100, '% relative error')
+            else:
+                print (key, ': ', item)
+        return self.results
+
+
+
     def save_results (self, name):
         report = {
             'fitted elastic constant': self.type,
@@ -172,6 +309,8 @@ class CriticalExponentFit:
 
         with open(name, 'w') as f:
             json.dump(report, f, indent=4)
+
+
 
     def plot_results (self):
         # calculate the fitted elastic constant

@@ -51,17 +51,20 @@ fit_ranges = {
 
 
 
+
 # run the fit >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 fit = CriticalExponentFit(filepath, initial_conditions, fit_ranges, elastic_constant_to_fit, include_errors)
 fit.import_data()
 fit.fit_background()
-results = fit.run_fit()
-fit.save_results(save_path)
+# results = fit.run_fit()
+# fit.save_results(save_path)
     
 # plt.figure()
 # plt.plot(fit.T, fit.elastic_constant)
 # plt.plot(fit.T, fit.line([fit.initial_conditions['C']['initial_value'], fit.initial_conditions['D']['initial_value']], fit.T))
-    
+
+results = fit.run_odr_fit()
+
 fit.plot_results()
