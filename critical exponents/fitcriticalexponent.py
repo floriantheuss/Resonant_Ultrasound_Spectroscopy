@@ -7,13 +7,15 @@ import json
 
 class CriticalExponentFit:
 
-    def __init__ (self, filepath, initial_conditions, fit_ranges, type_of_elastic_constant, include_error_bars):
+    def __init__ (self, filepath, initial_conditions, fit_ranges, type_of_elastic_constant, include_error_bars, fit_algorithm, save_path):
         """
         fileapath: location of text file containing irreducible elastic constants with errors
         initial_conditions: dictionary giving initial conditions, boundaries, and True/False if parameter is supposed to be fitted/kept fixed
         fit_ranges: dictionary of two fit ranges; one for the background fit and another one for fit of critical exponent
         type_of_elastic_constant: which elastic constant do you want to fit? Options are 'Bulk' for bulk modulus or 'E2g'
         include_error_bars: do you want to include error bars of the elastic constants in your fit (True/False)
+        fit_algorithm: in this code you can fit the data with lmfit or scipy.odr so the options are 'lmfit'/'odr'
+        save_path: location where fit results are saved
         """
         self.filepath = filepath
         self.initial_conditions = initial_conditions
@@ -28,6 +30,10 @@ class CriticalExponentFit:
         self.results = {}
 
         self.include_errors = include_error_bars
+
+        self.fit_algorithm = fit_algorithm
+
+        self.save_path = save_path
 
         ## Initialize fit parameters >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
         self.params = Parameters()
@@ -183,7 +189,7 @@ class CriticalExponentFit:
 
         
 
-    def run_fit (self):
+    def run_lmfit_fit (self):
 
         out = minimize(self.residual_function, self.params, method='least_squares')
         ## Display fit report
@@ -296,12 +302,29 @@ class CriticalExponentFit:
                 print (key, ': ', item)
         return self.results
 
+    
+    def fit (self):
+        self.import_data()
+        self.fit_background()
+
+        if self.fit_algorithm == 'lmfit':
+            results = self.run_lmfit_fit()
+        elif self.fit_algorithm == 'odr':
+            results = self.run_odr_fit()
+        
+        self.save_results(self.save_path)
+
+        self.plot_results()
+
+        return 1
+
 
 
     def save_results (self, name):
         report = {
             'fitted elastic constant': self.type,
             'include errors for elastic constant': self.include_errors,
+            'fit algorithm used': self.fit_algorithm,
             'bounds for fits': self.fit_ranges,
             'input parameters': self.initial_conditions,
             'fit results': self.results
@@ -390,43 +413,3 @@ class CriticalExponentFit:
         secax.xaxis.tick_top()
 
         plt.show()
-
-
-
-# test >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-#>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-if __name__ == '__main__':
-
-    ## Initial parameters 
-    initial_conditions = {
-        'Tc': {'initial_value':369.9, 'bounds':[368, 371], 'vary':False},
-        'alpha': {'initial_value':0.35, 'bounds':[0, 0.8], 'vary':True},
-        'delta': {'initial_value':0.1, 'bounds':[0, 100], 'vary':True},
-        'A': {'initial_value':-2, 'bounds':[-10, 0], 'vary':True},
-        'B': {'initial_value':-1, 'bounds':[-50, 0], 'vary':True}
-        }
-    
-    fit_ranges = {
-        'background':{'Tmin':390, 'Tmax':500},
-        'critical_exponent':{'Tmin':370.5, 'Tmax':500}
-    }
-
-    elastic_constant_to_fit = 'E2g'
-    include_errors = True
-
-    folder = "C:\\Users\\Florian\\Box Sync\\Projects"
-    project = "\\Mn3Ge\\RUS\\Mn3Ge_2001B\\irreducible_elastic_constants_with_error.txt"
-    filepath = folder+project
-
-    test = CriticalExponentFit(filepath, initial_conditions, fit_ranges, elastic_constant_to_fit, include_errors)
-    test.import_data()
-    test.fit_background()
-    results = test.run_fit()
-    test.save_results('test.json')
-    
-
-    plt.figure()
-    plt.plot(test.T, test.elastic_constant)
-    plt.plot(test.T, test.line([test.initial_conditions['C']['initial_value'], test.initial_conditions['D']['initial_value']], test.T))
-    
-    test.plot_results()
