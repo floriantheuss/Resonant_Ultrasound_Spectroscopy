@@ -4,6 +4,10 @@ from time import time
 from copy import deepcopy
 from lmfit import minimize, Parameters, report_fit
 import matplotlib.pyplot as plt
+from scipy import misc
+from matplotlib.widgets import Slider
+from scipy.optimize import curve_fit
+from scipy import stats
 
 class ElasticSolid:
 
@@ -149,49 +153,91 @@ class ElasticSolid:
         return Gmat
 
     def resonance_frequencies (self, pars=None, nb_freq=None):
+        t1 = time()
+        
         if nb_freq==None:
-            nb_freq = self.nb_freq
-
-        t1 = time()        
+            nb_freq = self.nb_freq   
         if pars is None:
             pars = self.elasticConstants_dict
+
         Gmat = self.G_mat(pars)
         w = np.array([])
         for ii in range(8): 
             w = np.concatenate((w, LA.eigh(Gmat[np.ix_(self.block[ii], self.block[ii])], self.Emat[np.ix_(self.block[ii], self.block[ii])], eigvals_only=True)))
         f = np.sqrt(np.absolute(np.sort(w))[6:nb_freq+6])/(2*np.pi)/1e6
-        print ('solving for the resonance frequencies took ', time()-t1, ' s')
+        #print ('solving for the resonance frequencies took ', time()-t1, ' s')
         return f
 
 
-    def log_derivative (self, el_const, direction_of_derivative, h=1e-16**(1/3)):
-        
-        for key in el_const:
-            el_const[key] = el_const[key]
-
-        freq = self.resonance_frequencies(el_const)
-        c_over_f = el_const[direction_of_derivative] / freq
-
-        el_const[direction_of_derivative] = el_const[direction_of_derivative] + 2*h
-        derivative = -self.resonance_frequencies(el_const)
-
-        el_const[direction_of_derivative] = el_const[direction_of_derivative] - h
-        derivative = derivative + 8 * self.resonance_frequencies(el_const)
-
-        el_const[direction_of_derivative] = el_const[direction_of_derivative] - 2*h
-        derivative = derivative - 8 * self.resonance_frequencies(el_const)
-
-        el_const[direction_of_derivative] = el_const[direction_of_derivative] - h
-        derivative = derivative + self.resonance_frequencies(el_const)
-
-        derivative = derivative / (12*h)
-
-        log_der = derivative * c_over_f
-
-        return (log_der)
 
 
 
+    def log_derivatives (self, pars=None, dc=100, N=100):
+        if pars is None:
+            pars = self.elasticConstants_dict
+
+        def line (x, a, b):
+            return a*x + b
+
+        freq_results = self.resonance_frequencies(pars=pars)
+
+        log_derivatives = {}
+        fit_results = {}
+        for elastic_constant in pars:
+            print ('start taking derivative with respect to ', elastic_constant)
+            t1 = time()
+            c_result = pars[elastic_constant]
+            c_test = np.linspace(c_result-N/2*dc, c_result+N/2*dc, N)
+            elasticConstants = pars
+            freqtest = []
+            Ctest = []
+            for c in c_test:
+                elasticConstants[elastic_constant] = c
+                freqtest.append(self.resonance_frequencies(pars=elasticConstants)-freq_results)
+                Ctest.append( c )
+            freqtest = np.transpose(np.array(freqtest))
+            Ctest = np.array(Ctest) - c_result
+            derivative = []
+            offset = []
+            sigmas = []
+            ii = 0
+            for freq in freqtest:
+                popt, pcov = curve_fit(line, Ctest, freq*1e6, p0=[1e-7, 0])
+                derivative.append(popt[0]/1e6)
+                offset.append(popt[1]/1e6)
+
+                sigma = stats.norm.pdf(Ctest, 0, N*dc/8)
+                sigma = sigma / max(sigma)
+                for i in np.arange(len(sigma)):
+                    if sigma[i]<1e-6:
+                        sigma[i] = 1e-6
+          
+                popt1, p1 = curve_fit(line, Ctest, freq*1e6, sigma=sigma, p0=[1e-7, 0])
+                
+                if 2*abs(popt1[0]-popt[0])/1e6*pars[elastic_constant]/freq_results[ii] > 5e-6:
+                    print ('not sure if data is a straight line ', elastic_constant, ' ', freq_results[ii], ' MHz')
+                ii += 1
+                sigmas.append((max(freq)-min(freq))*sigma+min(freq))
+
+
+            fit_results[elastic_constant] = {
+                'freq_test': freqtest,
+                'c_test': Ctest,
+                'slope': np.array(derivative),
+                'offset': np.array(offset),
+                'error': np.array(sigmas)
+            }
+
+            log_der = 2 * np.array(derivative) * pars[elastic_constant]/freq_results
+            log_derivatives[elastic_constant] = log_der 
+            print ('derivative with respect to ', elastic_constant, ' done in ', round(time()-t1, 4), ' s')
+        return (log_derivatives, fit_results)
+
+
+ 
+      
+
+    
         
 
 
@@ -213,24 +259,67 @@ if __name__ == '__main__':
         }
 
     nb_freq = 20
-
+    
+    t0 = time()
+    print ('initialize the class ...')
     srtio3 = ElasticSolid(initElasticConstants_dict, mass, dimensions, order, nb_freq, method='differential_evolution')
+    print ('class initialized in ', round(time()-t0, 4), ' s')
 
     f = srtio3.resonance_frequencies()
     print(f)
 
-    log_der = []
-    for key in initElasticConstants_dict:
-        log_der.append(srtio3.log_derivative(initElasticConstants_dict, key, h=1e-15))
-    print (log_der)
-    log_der_t = np.transpose(np.array(log_der))
-    sums = [sum(ld) for ld in log_der_t]
-    
-    plt.figure()
-    plt.plot(np.arange(len(sums)), sums, 'o')
+    derivatives, fit_results = srtio3.log_derivatives(pars=initElasticConstants_dict)
+    print ('logarithmic derivatives')
+    print (derivatives)
+
+    print ('sum of all logarithmic derivatives at one frequency')
+    print (derivatives['c11'] + derivatives['c12'] + derivatives['c44'])
 
     plt.figure()
-    for ld in log_der:
-        plt.plot ( np.arange(len(ld)), ld, 'o' )
+    for key in derivatives:
+        plt.plot(np.arange(len(derivatives[key])), derivatives[key], 'o', label=key)
+    plt.legend()
+
+  
+
+
+
+    # test derivatives
+    fig, ax = plt.subplots(1,1)
+    elc = 'c12'
+
+        
+    freqtest = fit_results[elc]['freq_test']
+    Ctest = fit_results[elc]['c_test']
+    slope = fit_results[elc]['slope']
+    offset = fit_results[elc]['offset']
+    sigma = fit_results[elc]['error']
+    fit = []
+    for ii in np.arange(len(offset)):
+        fit.append(  slope[ii]*Ctest + offset[ii]  )
+
+    
+    plot = ax.scatter(Ctest, freqtest[0])
+    plotf, = ax.plot(Ctest, fit[0], color='red')
+    plots, = ax.plot(Ctest, sigma[0], color='green')
+
+    # set slider which goes between different resonances
+    slider_axis = plt.axes([0.15, .92, 0.2, 0.03], facecolor='lightgrey')
+    slider = Slider(slider_axis, 'Resonance', 0, len(freqtest)-1, valinit=0, valstep=1, color='red')
+    slider.label.set_size(15)
+
+    def update(val):
+        plot.set_offsets(np.array(list(zip(Ctest, freqtest[val]))))
+        plotf.set_ydata(fit[val])
+        plots.set_ydata(sigma[val])
+        mean = np.mean(freqtest[val])
+        dev = max(freqtest[val]) - mean
+        ax.set_ylim(mean-1.1*dev, mean+1.1*dev)
+        fig.canvas.draw_idle()
+
+
+    slider.on_changed(update)
+
+
 
     plt.show()
