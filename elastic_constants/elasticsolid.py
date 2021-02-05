@@ -1,13 +1,11 @@
 import numpy as np
 from scipy import linalg as LA
 from time import time
-from copy import deepcopy
 from lmfit import minimize, Parameters, report_fit
 import matplotlib.pyplot as plt
-from scipy import misc
 from matplotlib.widgets import Slider
-from scipy.optimize import curve_fit
-from scipy import stats
+import copy
+from multiprocessing import cpu_count, Pool
 
 class ElasticSolid:
 
@@ -152,7 +150,7 @@ class ElasticSolid:
         Gmat = np.swapaxes(Gtens, 2, 1).reshape(3*self.idx, 3*self.idx)
         return Gmat
 
-    def resonance_frequencies (self, pars=None, nb_freq=None):
+    def resonance_frequencies (self, pars=None, nb_freq=None, eigvals_only=True):
         # t1 = time()
         
         if nb_freq==None:
@@ -161,18 +159,57 @@ class ElasticSolid:
             pars = self.elasticConstants_dict
 
         Gmat = self.G_mat(pars)
-        w = np.array([])
-        for ii in range(8): 
-            w = np.concatenate((w, LA.eigh(Gmat[np.ix_(self.block[ii], self.block[ii])], self.Emat[np.ix_(self.block[ii], self.block[ii])], eigvals_only=True)))
-        f = np.sqrt(np.absolute(np.sort(w))[6:nb_freq+6])/(2*np.pi) # resonance frequencies in Hz
+        if eigvals_only==True:
+            w = np.array([])
+            for ii in range(8): 
+                w = np.concatenate((w, LA.eigh(Gmat[np.ix_(self.block[ii], self.block[ii])], self.Emat[np.ix_(self.block[ii], self.block[ii])], eigvals_only=True)))
+            f = np.sqrt(np.absolute(np.sort(w))[6:nb_freq+6])/(2*np.pi) # resonance frequencies in Hz
+            return f
+        else:
+            w, a = LA.eigh(Gmat, self.Emat)
+            a = a.transpose()[np.argsort(w)][6:nb_freq+6]
+            f = np.sqrt(np.absolute(np.sort(w))[6:nb_freq+6])/(2*np.pi) # resonance frequencies in Hz
+            return f, a
         #print ('solving for the resonance frequencies took ', time()-t1, ' s')
-        return f
+
+
+    def log_derivatives_analytical (self, pars):
+        f, a = self.resonance_frequencies(pars, eigvals_only=False)
+        derivative_matrix = np.zeros((self.nb_freq, len(pars)))
+        ii = 0
+        for direction, value in pars.items():
+            Cderivative_dict = {key: 0 for key in pars}
+            Cderivative_dict[direction] = 1
+            Gmat_derivative = self.G_mat(Cderivative_dict)
+            for idx, res in enumerate(f):
+                derivative_matrix[idx, ii] = np.matmul(a[idx], np.matmul(Gmat_derivative, a[idx]) ) / res * 2*np.pi * value
+            ii += 1
+        log_derivative = np.zeros((self.nb_freq, len(pars)))
+        for idx, der in enumerate(derivative_matrix):
+            log_derivative[idx] = der / sum(der)
+
+        formats = "{0:<15}{1:<15}"
+        k = 2
+        for _ in log_derivative[0]:
+            formats = formats + '{' + str(k) + ':<15}'
+            k+=1
+        print ('-----------------------------------------------------------------------')
+        print ('-----------------------------------------------------------------------')
+        print ('2 x LOGARITHMIC DERIVATIVES')
+        print ('-----------------------------------------------------------------------')
+        print (formats.format('f [MHz]','dlnf/dlnc11','dlnf/dlnc12','dlnf/dlnc44','SUM') )
+        for idx, line in enumerate(log_derivative):
+            text = [str(round(f[idx]/1e6,6))] + [str(round(d, 6)) for d in line] + [str(round(sum(line),7))]
+            print ( formats.format(*text) )
+        print ('-----------------------------------------------------------------------')
+        print ('-----------------------------------------------------------------------')
+
+        return log_derivative
 
 
 
 
-
-    def log_derivatives (self, pars=None, dc=1000, N=50, Rsquared_threshold=1e-5):
+    def log_derivatives_numerical (self, pars=None, dc=1e5, N=5, Rsquared_threshold=1e-5, parallel=False, nb_workers=None ):
         """
         calculating logarithmic derivatives of the resonance frequencies with respect to elastic constants,
         i.e. (df/dc)*(c/f);
@@ -182,9 +219,19 @@ class ElasticSolid:
         """
         if pars is None:
             pars = self.elasticConstants_dict
-        
+        if nb_workers is None:
+            nb_workers = min( [int(cpu_count()/2), N] )
+
+
         # calculate the resonance frequencies for the "true" elastic constants
         freq_result = self.resonance_frequencies(pars=pars)
+
+
+        if parallel == True:
+                print("# of available cores: ", cpu_count())
+                pool = Pool(processes=nb_workers)
+                print("--- Pool initialized with ", nb_workers, " workers ---")
+        
 
         fit_results_dict = {}
         Rsquared_matrix = np.zeros([len(freq_result), len(pars)])
@@ -197,15 +244,41 @@ class ElasticSolid:
             # create an array of elastic constants centered around the "true" value
             c_result = pars[elastic_constant]
             c_derivative_array = np.linspace(c_result-N/2*dc, c_result+N/2*dc, N)
-            elasticConstants_derivative_dict = pars
-            freq_derivative_matrix = np.zeros([len(freq_result), N])
+            elasticConstants_derivative_dict = copy.deepcopy(pars)
             # calculate the resonance frequencies for all elastic constants in c_test and store them in Ctest
-            for idx, c in enumerate(c_derivative_array):
+
+            # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            # # this calculates all the necessary sets of resonance frequencies for the derivative in parallel
+            # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            elasticConstants_derivative_array = []
+            # here we are creating an array where each element is a dictionary of a full set
+            # of elastic constants. Hopefully, we can give this array to a pool.map
+            for c in c_derivative_array:
                 elasticConstants_derivative_dict[elastic_constant] = c
-                # note we don't actually save the resonance frequencies, but we shift them by the values at the "true" elastic constants;
-                # this is done because within the elastic constants in c_test the frequencies change only very little compared to their absolute value,
-                # thus this shift is important to get a good fit later
-                freq_derivative_matrix[:,idx] = self.resonance_frequencies(pars=elasticConstants_derivative_dict)-freq_result
+                # copy.deepcopy actually makes a copy of the dictionary instead of just creating a new pointer to the same location
+                elasticConstants_derivative_array.append(copy.deepcopy(elasticConstants_derivative_dict))
+            
+            if parallel == True:
+                # print("# of available cores: ", cpu_count())
+                # pool = Pool(processes=nb_workers)
+                freq_derivative_matrix = pool.map(self.resonance_frequencies, elasticConstants_derivative_array) - np.array([freq_result for _ in np.arange(N)])
+                freq_derivative_matrix = np.transpose( np.array( freq_derivative_matrix ) )
+            else:
+                freq_derivative_matrix = np.zeros([len(freq_result), N])
+                for idx, parameter_set in enumerate(elasticConstants_derivative_array):
+                    freq_derivative_matrix[:, idx] = self.resonance_frequencies(pars=parameter_set) - freq_result
+
+
+            # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            # # this calculates all the necessary sets of resonance frequencies for the derivative in series
+            # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            # for idx, c in enumerate(c_derivative_array):
+            #     elasticConstants_derivative_dict[elastic_constant] = c
+            #     # note we don't actually save the resonance frequencies, but we shift them by the values at the "true" elastic constants;
+            #     # this is done because within the elastic constants in c_test the frequencies change only very little compared to their absolute value,
+            #     # thus this shift is important to get a good fit later
+            #     freq_derivative_matrix[:,idx] = self.resonance_frequencies(pars=elasticConstants_derivative_dict)-freq_result
+            
             # shift array of elastic constants to be centered around zero, for similar argument made for the shift of resonance frequencies
             c_derivative_array = c_derivative_array - c_result
             
@@ -247,12 +320,11 @@ class ElasticSolid:
                 'Rsquared': Rsquared_matrix
             }
 
-            # calculate the logarithmic derivative from the derivative
-            # log_der = 2 * np.array(derivative) * pars[elastic_constant]/freq_results
-            # store it in a dictionary
-            # log_derivatives[elastic_constant] = log_der 
             print ('derivative with respect to ', elastic_constant, ' done in ', round(time()-t1, 4), ' s')
             ii += 1
+
+        if parallel == True:
+            pool.terminate()
 
         formats = "{0:<15}{1:<15}"
         k = 2
@@ -270,7 +342,7 @@ class ElasticSolid:
         print ('-----------------------------------------------------------------------')
         print ('-----------------------------------------------------------------------')
     
-        return (log_derivative_matrix, fit_results_dict)
+        return (log_derivative_matrix)
 
 
 
@@ -299,64 +371,65 @@ if __name__ == '__main__':
     f = srtio3.resonance_frequencies()
     print(f/1e6)
 
-    derivatives, fit_results = srtio3.log_derivatives(pars=initElasticConstants_dict)
-    # derivatives = srtio3.log_derivatives(pars=initElasticConstants_dict)
+    dern, fit_results = srtio3.log_derivatives_numerical(pars=initElasticConstants_dict)
+    dera = srtio3.log_derivatives_analytical(pars=initElasticConstants_dict)
     
-    
-    plt.figure()
-    for line in np.transpose(derivatives):
-        plt.plot(np.arange(len(line)), line, 'o')#, label=key)
-    # plt.legend()
+
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    # plot the fit results for the derivative >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    # plt.figure()
+    # for line in np.transpose(derivatives):
+    #     plt.plot(np.arange(len(line)), line, 'o')#, label=key)
+    # # plt.legend()
 
   
-
-
-
-    # test derivatives
-    fig, ax = plt.subplots(1,1)
-    elc = 'c12'
+    # # test derivatives
+    # fig, ax = plt.subplots(1,1)
+    # elc = 'c12'
 
     
-    freqtest = fit_results[elc]['freq_test']
-    Ctest = fit_results[elc]['c_test']
-    # slope = fit_results[elc]['slope']
-    # offset = fit_results[elc]['offset']
-    # sigma = fit_results[elc]['error']
-    Rsq = fit_results[elc]['Rsquared'][:,1]
-    fit = fit_results[elc]['fit']
-    # for ii in np.arange(len(offset)):
-    #     fit.append(  slope[ii]*Ctest + offset[ii]  )
+    # freqtest = fit_results[elc]['freq_test']
+    # Ctest = fit_results[elc]['c_test']
+    # # slope = fit_results[elc]['slope']
+    # # offset = fit_results[elc]['offset']
+    # # sigma = fit_results[elc]['error']
+    # Rsq = fit_results[elc]['Rsquared'][:,1]
+    # fit = fit_results[elc]['fit']
+    # # for ii in np.arange(len(offset)):
+    # #     fit.append(  slope[ii]*Ctest + offset[ii]  )
 
     
-    # SSres = sum( ( freqtest[0] - fit[0] )**2 )
-    # SStot = sum( ( freqtest[0] - np.mean(freqtest[0]) )**2 )
-    # ax.set_title(str(1-SSres/SStot))
-    ax.set_title(str(Rsq[0]))
-    plot = ax.scatter(Ctest, freqtest[0])
-    plotf, = ax.plot(Ctest, fit[0], color='red')
-    # plots, = ax.plot(Ctest, sigma[0], color='green')
+    # # SSres = sum( ( freqtest[0] - fit[0] )**2 )
+    # # SStot = sum( ( freqtest[0] - np.mean(freqtest[0]) )**2 )
+    # # ax.set_title(str(1-SSres/SStot))
+    # ax.set_title(str(Rsq[0]))
+    # plot = ax.scatter(Ctest, freqtest[0])
+    # plotf, = ax.plot(Ctest, fit[0], color='red')
+    # # plots, = ax.plot(Ctest, sigma[0], color='green')
 
-    # set slider which goes between different resonances
-    slider_axis = plt.axes([0.15, .92, 0.2, 0.03], facecolor='lightgrey')
-    slider = Slider(slider_axis, 'Resonance', 0, len(freqtest)-1, valinit=0, valstep=1, color='red')
-    slider.label.set_size(15)
+    # # set slider which goes between different resonances
+    # slider_axis = plt.axes([0.15, .92, 0.2, 0.03], facecolor='lightgrey')
+    # slider = Slider(slider_axis, 'Resonance', 0, len(freqtest)-1, valinit=0, valstep=1, color='red')
+    # slider.label.set_size(15)
 
-    def update(val):
-        plot.set_offsets(np.array(list(zip(Ctest, freqtest[val]))))
-        plotf.set_ydata(fit[val])
-        # plots.set_ydata(sigma[val])
-        mean = np.mean(freqtest[val])
-        dev = max(freqtest[val]) - mean
-        ax.set_ylim(mean-1.1*dev, mean+1.1*dev)
-        # SSres = sum( ( freqtest[val] - fit[val] )**2 )
-        # SStot = sum( ( freqtest[val] - np.mean(freqtest[val]) )**2 )
-        # ax.set_title(str(1-SSres/SStot))
-        ax.set_title(str(Rsq[val]))
-        fig.canvas.draw_idle()
-
-
-    slider.on_changed(update)
+    # def update(val):
+    #     plot.set_offsets(np.array(list(zip(Ctest, freqtest[val]))))
+    #     plotf.set_ydata(fit[val])
+    #     # plots.set_ydata(sigma[val])
+    #     mean = np.mean(freqtest[val])
+    #     dev = max(freqtest[val]) - mean
+    #     ax.set_ylim(mean-1.1*dev, mean+1.1*dev)
+    #     # SSres = sum( ( freqtest[val] - fit[val] )**2 )
+    #     # SStot = sum( ( freqtest[val] - np.mean(freqtest[val]) )**2 )
+    #     # ax.set_title(str(1-SSres/SStot))
+    #     ax.set_title(str(Rsq[val]))
+    #     fig.canvas.draw_idle()
 
 
+    # slider.on_changed(update)
 
-    plt.show()
+
+
+    # plt.show()
