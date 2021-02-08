@@ -11,10 +11,14 @@ class ElasticSolid:
 
     # instance attributes
     def __init__(self, initElasticConstants_dict, mass, dimensions, order, nb_freq, method='differential_evolution'):
-        # elastic constants should be a dictionary
-        # mass should just be a number
-        # dimensions should be a numpy array
-        # CrystalStructure should be a string
+        """
+        initElasticConstants_dict: a dictionary of elastic constants in Pa
+        mass: a number in kg
+        dimensions: numpy array of x, y, z lengths in m
+        order: integer - highest order polynomial used to express basis functions
+        nb_freq: number of frequencies to display
+        method: fitting method
+        """
         
         self.mass       = mass # mass of the sample
         self.rho        = mass / np.prod(dimensions)
@@ -24,7 +28,7 @@ class ElasticSolid:
 
         self.Vol         = dimensions/2 # sample dimensions divided by 2
 
-        self.elasticConstants_dict = initElasticConstants_dict
+        self.elasticConstants_dict = copy.deepcopy(initElasticConstants_dict)
 
         self.nb_freq = nb_freq
 
@@ -37,7 +41,9 @@ class ElasticSolid:
 
 
 
-        # create basis
+        # create basis and sort it based on its parity;
+        # for details see Arkady's paper;
+        # this is done here in __init__ because we only need to is once and it is the "long" part of the calculation
         lookUp = {(1, 1, 1) : 0, (1, 1, -1) : 1, (1, -1, 1) : 2, (-1, 1, 1) : 3, (1, -1, -1): 4, (-1, 1, -1) : 5, (-1, -1, 1) : 6, (-1, -1, -1) : 7}
 
         self.basis  = np.zeros((self.N, 3))
@@ -61,6 +67,11 @@ class ElasticSolid:
 
 
     def elastic_tensor (self, pars):
+        """
+        returns the elastic tensor from given elastic constants in pars
+        (a dictionary of elastic constants)
+        based on the length of pars it decides what crystal structure we the sample has
+        """
         ctens = np.zeros([3,3,3,3])
 
         if len(pars) == 3:                      # cubic
@@ -112,12 +123,18 @@ class ElasticSolid:
 
 
 
-    def E_int (self, i, j):       # calculates integral for kinetic energy matrix, i.e. the product of two basis functions
+    def E_int (self, i, j):
+        """
+        calculates integral for kinetic energy matrix, i.e. the product of two basis functions
+        """
         ps = self.basis[i] + self.basis[j] + 1.
         if np.any(ps%2==0): return 0.
         return 8*np.prod(self.Vol**ps / ps)
 
-    def G_int (self, i, j, k, l): # calculates the integral for potential energy matrix, i.e. the product of the derivatives of two basis functions
+    def G_int (self, i, j, k, l):
+        """
+        calculates the integral for potential energy matrix, i.e. the product of the derivatives of two basis functions
+        """
         M = np.array([[[2.,0.,0.],[1.,1.,0.],[1.,0.,1.]],[[1.,1.,0.],[0.,2.,0.],[0.,1.,1.]],[[1.,0.,1.],[0.,1.,1.],[0.,0.,2.]]])
         if not self.basis[i][k]*self.basis[j][l]: return 0
         ps = self.basis[i] + self.basis[j] + 1. - M[k,l]
@@ -125,6 +142,10 @@ class ElasticSolid:
         return 8*self.basis[i][k]*self.basis[j][l]*np.prod(self.Vol**ps / ps)
 
     def E_mat (self):
+        """
+        put the integrals from E_int in a matrix
+        Emat is the kinetic energy matrix from Arkady's paper
+        """
         Etens = np.zeros((3,self.idx,3,self.idx), dtype= np.double)
         for x in range(3*self.idx):
             i, k = int(x/self.idx), x%self.idx
@@ -136,6 +157,11 @@ class ElasticSolid:
         return Emat
 
     def I_tens (self):
+        """
+        put the integrals from G_int in a tensor;
+        it is the tensor in the potential energy matrix in Arkady's paper;
+        i.e. it is the the potential energy matrix without the elastic tensor;
+        """
         Itens = np.zeros((3,self.idx,3,self.idx), dtype= np.double)
         for x in range(3*self.idx):
             i, k = int(x/self.idx), x%self.idx
@@ -145,13 +171,24 @@ class ElasticSolid:
         return Itens
 
     def G_mat (self, pars):
+        """
+        get potential energy matrix;
+        this is a separate step because I_tens is independent of elastic constants, but only dependent on geometry;
+        it is also the slow part of the calculation but only has to be done once this way
+        """
         C = self.elastic_tensor(pars)
         Gtens = np.tensordot(C, self.Itens, axes= ([1,3],[0,2]))
         Gmat = np.swapaxes(Gtens, 2, 1).reshape(3*self.idx, 3*self.idx)
         return Gmat
 
     def resonance_frequencies (self, pars=None, nb_freq=None, eigvals_only=True):
-        # t1 = time()
+        """
+        calculates resonance frequencies in Hz;
+        pars: dictionary of elastic constants
+        nb_freq: number of elastic constants to be displayed
+        eigvals_only (True/False): gets only eigenvalues (i.e. resonance frequencies) or also gives eigenvectors (the latter is important when we want to calculate derivatives)
+        """
+
         
         if nb_freq==None:
             nb_freq = self.nb_freq   
@@ -168,12 +205,16 @@ class ElasticSolid:
         else:
             w, a = LA.eigh(Gmat, self.Emat)
             a = a.transpose()[np.argsort(w)][6:nb_freq+6]
-            f = np.sqrt(np.absolute(np.sort(w))[6:nb_freq+6])/(2*np.pi) # resonance frequencies in Hz
+            f = np.sqrt(np.absolute(np.sort(w))[6:nb_freq+6])/(2*np.pi) 
             return f, a
-        #print ('solving for the resonance frequencies took ', time()-t1, ' s')
+
 
 
     def log_derivatives_analytical (self, pars):
+        """
+        calculating logarithmic derivatives of the resonance frequencies with respect to elastic constants,
+        i.e. (df/dc)*(c/f), following Arkady's paper
+        """
         f, a = self.resonance_frequencies(pars, eigvals_only=False)
         derivative_matrix = np.zeros((self.nb_freq, len(pars)))
         ii = 0
@@ -187,7 +228,8 @@ class ElasticSolid:
         log_derivative = np.zeros((self.nb_freq, len(pars)))
         for idx, der in enumerate(derivative_matrix):
             log_derivative[idx] = der / sum(der)
-
+        
+        # print the logarithmic derivatives of each frequency
         formats = "{0:<15}{1:<15}"
         k = 2
         for _ in log_derivative[0]:
@@ -212,7 +254,7 @@ class ElasticSolid:
     def log_derivatives_numerical (self, pars=None, dc=1e5, N=5, Rsquared_threshold=1e-5, parallel=False, nb_workers=None ):
         """
         calculating logarithmic derivatives of the resonance frequencies with respect to elastic constants,
-        i.e. (df/dc)*(c/f);
+        i.e. (df/dc)*(c/f), by calculating the resonance frequencies for slowly varying elastic constants
         variables: pars (dictionary of elastic constants), dc, N
         The derivative is calculated by computing resonance frequencies for N different elastic cosntants centered around the value given in pars and spaced by dc.
         A line is then fitted through these points and the slope is extracted as the derivative.
@@ -326,6 +368,7 @@ class ElasticSolid:
         if parallel == True:
             pool.terminate()
 
+        # print the logarithmic derivatives of each frequency
         formats = "{0:<15}{1:<15}"
         k = 2
         for _ in log_derivative_matrix[0]:
