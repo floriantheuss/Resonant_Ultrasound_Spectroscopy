@@ -6,11 +6,12 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
 import copy
 from multiprocessing import cpu_count, Pool
+from numba import jit
 
 class ElasticSolid:
 
     # instance attributes
-    def __init__(self, initElasticConstants_dict, mass, dimensions, order, nb_freq, method='differential_evolution'):
+    def __init__(self, initElasticConstants_dict, ElasticConstants_bounds, ElasticConstants_vary, mass, dimensions, order, nb_freq, method='differential_evolution', freqs_file=None):
         """
         initElasticConstants_dict: a dictionary of elastic constants in Pa
         mass: a number in kg
@@ -28,17 +29,29 @@ class ElasticSolid:
 
         self.Vol         = dimensions/2 # sample dimensions divided by 2
 
-        self.elasticConstants_dict = copy.deepcopy(initElasticConstants_dict)
+        self.init_elasticConstants_dict = copy.deepcopy(initElasticConstants_dict)
+        self.elasticConstants_bounds = ElasticConstants_bounds
+        self.elasticConstants_vary = ElasticConstants_vary
 
         self.nb_freq = nb_freq
 
-        
-        self.method      = method # "shgo", "differential_evolution", "leastsq"
-        self.pars        = Parameters()
-        # for param_name, param_range in self.elasticConstants_dict.items():
-        #     self.pars.add(param_name, value = self.elasticConstants_dict[param_name])#, min = param_range[0], max = param_range[-1])
-        
 
+        
+        ## fit algorithm
+        self.method      = method # "shgo", "differential_evolution", "leastsq"
+        ## Initialize fit parameters >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        self.params = Parameters()
+        for c in self.init_elasticConstants_dict:
+            self.params.add(c, value=self.init_elasticConstants_dict[c], vary=self.elasticConstants_vary[c], min=self.elasticConstants_bounds[c][0], max=self.elasticConstants_bounds[c][-1])
+        
+        # keeps track of how often the residual function is called
+        self.call = 1
+        # initialize a variable which will contain the fit results for the elastic constants
+        self.fit_results = {}
+
+        # imports the measured resonance frequencies
+        self.freqs_file = freqs_file
+        self.freqs_data = None
 
 
         # create basis and sort it based on its parity;
@@ -60,7 +73,16 @@ class ElasticSolid:
 
         self.Emat = self.E_mat()
         self.Itens = self.I_tens()
-    
+
+
+
+    def load_data(self):
+        """
+        Frequencies should be in Hz
+        """
+        ## Load the resonance data in MHz
+        freqs_data = np.loadtxt(self.freqs_file, dtype="float", comments="#")
+        return freqs_data 
 
 
             
@@ -140,7 +162,10 @@ class ElasticSolid:
         ps = self.basis[i] + self.basis[j] + 1. - M[k,l]
         if np.any(ps%2==0): return 0.
         return 8*self.basis[i][k]*self.basis[j][l]*np.prod(self.Vol**ps / ps)
+    
 
+    # @staticmethod
+    # @jit(nopython=True)
     def E_mat (self):
         """
         put the integrals from E_int in a matrix
@@ -155,7 +180,10 @@ class ElasticSolid:
         
         Emat = Etens.reshape(3*self.idx,3*self.idx)
         return Emat
+    
 
+    # @staticmethod
+    # @jit(nopython=True)
     def I_tens (self):
         """
         put the integrals from G_int in a tensor;
@@ -193,7 +221,7 @@ class ElasticSolid:
         if nb_freq==None:
             nb_freq = self.nb_freq   
         if pars is None:
-            pars = self.elasticConstants_dict
+            pars = self.init_elasticConstants_dict
 
         Gmat = self.G_mat(pars)
         if eigvals_only==True:
@@ -230,21 +258,21 @@ class ElasticSolid:
             log_derivative[idx] = der / sum(der)
         
         # print the logarithmic derivatives of each frequency
-        formats = "{0:<15}{1:<15}"
-        k = 2
-        for _ in log_derivative[0]:
-            formats = formats + '{' + str(k) + ':<15}'
-            k+=1
-        print ('-----------------------------------------------------------------------')
-        print ('-----------------------------------------------------------------------')
-        print ('2 x LOGARITHMIC DERIVATIVES')
-        print ('-----------------------------------------------------------------------')
-        print (formats.format('f [MHz]','dlnf/dlnc11','dlnf/dlnc12','dlnf/dlnc44','SUM') )
-        for idx, line in enumerate(log_derivative):
-            text = [str(round(f[idx]/1e6,6))] + [str(round(d, 6)) for d in line] + [str(round(sum(line),7))]
-            print ( formats.format(*text) )
-        print ('-----------------------------------------------------------------------')
-        print ('-----------------------------------------------------------------------')
+        # formats = "{0:<15}{1:<15}"
+        # k = 2
+        # for _ in log_derivative[0]:
+        #     formats = formats + '{' + str(k) + ':<15}'
+        #     k+=1
+        # print ('-----------------------------------------------------------------------')
+        # print ('-----------------------------------------------------------------------')
+        # print ('2 x LOGARITHMIC DERIVATIVES')
+        # print ('-----------------------------------------------------------------------')
+        # print (formats.format('f [MHz]','dlnf/dlnc11','dlnf/dlnc12','dlnf/dlnc44','SUM') )
+        # for idx, line in enumerate(log_derivative):
+        #     text = [str(round(f[idx]/1e6,6))] + [str(round(d, 6)) for d in line] + [str(round(sum(line),7))]
+        #     print ( formats.format(*text) )
+        # print ('-----------------------------------------------------------------------')
+        # print ('-----------------------------------------------------------------------')
 
         return log_derivative
 
@@ -260,7 +288,7 @@ class ElasticSolid:
         A line is then fitted through these points and the slope is extracted as the derivative.
         """
         if pars is None:
-            pars = self.elasticConstants_dict
+            pars = self.init_elasticConstants_dict
         if nb_workers is None:
             nb_workers = min( [int(cpu_count()/2), N] )
 
@@ -390,11 +418,78 @@ class ElasticSolid:
 
 
 
+    # ->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->
+    # ->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->
+    # everything above was code to perform the actual calculations
+    # everything below will be fit algorithms
+    # ->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->
+    # ->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->
+
+
+    def residual_function (self, pars):
+        """
+        define the residual function used in lmfit;
+        i.e. (simulated resonance frequencies - data)
+        """
+        freqs_sim = self.resonance_frequencies(pars=pars, nb_freq=self.nb_freq)
+        freqs_exp = self.freqs_data[:self.nb_freq]
+        delta = freqs_sim - freqs_exp
+        
+        print ('call number ', self.call)
+        pars.pretty_print(columns=['value', 'min', 'max', 'vary'])
+        self.call += 1
+        return delta
+
+
+    def fit (self):
+        self.freqs_data = self.load_data()
+    
+        if method == 'differential_evolution':
+            out = minimize(self.residual_function, self.params, method=method, polish=True)
+        
+        ## Display fit report
+        report_fit(out)
+        print ('->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->')
+        print ('->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->')
+        print ()
+        formats = "{0:<7}{1:<10}{2:<5}{3:<12}{4:<12}{5:<30}{6:<20}"
+        for name, param in out.params.items():
+            self.fit_results[name] = param.value
+            text = [name+' =', '('+ str(round(param.value/1e9,3)), '+/-', str(round(param.stderr/1e9, 3))+') GPa', '('+str(round(param.stderr/param.value*100,2))+'%);', 'bounds (GPa): '+str(np.array(self.elasticConstants_bounds[name])/1e9)+';', 'init value = '+str(round(self.init_elasticConstants_dict[name]/1e9,3))+' GPa']
+            print ( formats.format(*text) )
+        print ()
+        print ('->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->')
+        print ('->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->')
+        print ()
+        fsim = self.resonance_frequencies(pars=self.fit_results)
+        log_der = self.log_derivatives_analytical (self.fit_results)
+        formats = "{0:<8}{1:<15}{2:<15}{3:<17}"
+        header_text = ['index', 'f exp (MHz)', 'f calc (MHz)', 'difference (%)']
+        nb = 4
+        for c in self.fit_results:
+            formats = formats + '{' + str(nb) + ':<15}'
+            header_text = header_text + ['2*df/dln'+c]
+            nb +=1
+        print(formats.format(*header_text))
+        for idx, _ in enumerate(self.freqs_data[:self.nb_freq]):
+            text = [idx, round(self.freqs_data[idx]/1e6, 5), round(fsim[idx]/1e6,5), round((self.freqs_data[idx]-fsim[idx])/self.freqs_data[idx]*100,5)]
+            derivatives = list(np.round(log_der[idx],6))
+            text = text + derivatives
+            print ( formats.format(*text) )
+        print ()
+        print ('->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->')
+        print ('->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->')
+        
+        return 1
+
+
+
+
 
 
 if __name__ == '__main__':
 
-    order = 12
+    order = 10
     mass = 0.045e-3
     dimensions = np.array([0.145e-2, 0.201e-2, 0.302e-2])
 
@@ -404,18 +499,36 @@ if __name__ == '__main__':
         'c44': 124.99627e9
         }
 
-    nb_freq = 30
-    
+    ElasticConstants_bounds = {
+        'c11': [280e9, 350e9],
+        'c12': [50e9, 150e9],
+        'c44': [80e9, 180e9]
+        }
+        
+    ElasticConstants_vary = {
+        'c11': True,
+        'c12': True,
+        'c44': True
+        }
+
+    nb_freq = 80
+    method = 'differential_evolution'
+
+    freqs_file = "C:\\Users\\Florian\\Box Sync\\Code\\Resonant_Ultrasound_Spectroscopy\\elastic_constants\\test\\SrTiO3_RT_frequencies.txt"
+
+
     t0 = time()
     print ('initialize the class ...')
-    srtio3 = ElasticSolid(initElasticConstants_dict, mass, dimensions, order, nb_freq, method='differential_evolution')
+    srtio3 = ElasticSolid(initElasticConstants_dict, ElasticConstants_bounds, ElasticConstants_vary, mass, dimensions, order, nb_freq, method, freqs_file)
     print ('class initialized in ', round(time()-t0, 4), ' s')
 
-    f = srtio3.resonance_frequencies()
-    print(f/1e6)
+    srtio3.fit()
 
-    dern, fit_results = srtio3.log_derivatives_numerical(pars=initElasticConstants_dict)
-    dera = srtio3.log_derivatives_analytical(pars=initElasticConstants_dict)
+    # f = srtio3.resonance_frequencies()
+    # print(f/1e6)
+
+    # dern = srtio3.log_derivatives_numerical(pars=initElasticConstants_dict)
+    # dera = srtio3.log_derivatives_analytical(pars=initElasticConstants_dict)
     
 
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
