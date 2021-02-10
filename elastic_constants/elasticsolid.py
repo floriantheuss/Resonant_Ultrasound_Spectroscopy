@@ -7,11 +7,13 @@ from matplotlib.widgets import Slider
 import copy
 from multiprocessing import cpu_count, Pool
 from numba import jit
+from scipy.spatial import distance_matrix
+from scipy.optimize import linear_sum_assignment
 
 class ElasticSolid:
 
     # instance attributes
-    def __init__(self, initElasticConstants_dict, ElasticConstants_bounds, ElasticConstants_vary, mass, dimensions, order, nb_freq, method='differential_evolution', freqs_file=None):
+    def __init__(self, initElasticConstants_dict, ElasticConstants_bounds, ElasticConstants_vary, mass, dimensions, order, nb_freq=None, method='differential_evolution', freqs_file=None, nb_missing_res=0):
         """
         initElasticConstants_dict: a dictionary of elastic constants in Pa
         mass: a number in kg
@@ -20,9 +22,11 @@ class ElasticSolid:
         nb_freq: number of frequencies to display
         method: fitting method
         """
+        self.crystal_structure = None
         
         self.mass       = mass # mass of the sample
         self.rho        = mass / np.prod(dimensions)
+        self.dimensions = dimensions
 
         self.order      = order # order of the highest polynomial used to calculate the resonacne frequencies
         self.N          = int((order+1)*(order+2)*(order+3)/6) # this is the number of basis functions
@@ -33,7 +37,17 @@ class ElasticSolid:
         self.elasticConstants_bounds = ElasticConstants_bounds
         self.elasticConstants_vary = ElasticConstants_vary
 
-        self.nb_freq = nb_freq
+        # imports the measured resonance frequencies
+        self.freqs_file = freqs_file
+        self.freqs_data = self.load_data()
+        
+        if nb_freq == None:
+            self.nb_freq = len(self.freqs_data)
+        else:
+            self.nb_freq = nb_freq
+        self.nb_missing_res = nb_missing_res
+        self.matching_idx = np.array([])
+        self.missing_idx = np.array([])
 
 
         
@@ -48,11 +62,6 @@ class ElasticSolid:
         self.call = 1
         # initialize a variable which will contain the fit results for the elastic constants
         self.fit_results = {}
-
-        # imports the measured resonance frequencies
-        self.freqs_file = freqs_file
-        self.freqs_data = None
-
 
         # create basis and sort it based on its parity;
         # for details see Arkady's paper;
@@ -97,11 +106,13 @@ class ElasticSolid:
         ctens = np.zeros([3,3,3,3])
 
         if len(pars) == 3:                      # cubic
+            self.crystal_structure = 'cubic'
             c11 = c22 = c33 = pars['c11']
             c12 = c13 = c23 = pars['c12']
             c44 = c55 = c66 = pars['c44']
 
         elif len(pars) == 5:                    # hexagonal
+            self.crystal_structure = 'hexagonal'
             c11 = c22       = pars['c11']
             c33             = pars['c33']
             c12             = pars['c12']
@@ -110,6 +121,7 @@ class ElasticSolid:
             c66             = (pars['c11']-pars['c12'])/2
         
         elif len(pars) == 6:                    # tetragonal
+            self.crystal_structure = 'tetragonal'
             c11 = c22       = pars['c11']
             c33             = pars['c33']
             c12             = pars['c12']
@@ -118,6 +130,7 @@ class ElasticSolid:
             c66             = pars['c66']
         
         elif len(pars) == 9:                    # orthorhombic
+            self.crystal_structure = 'orthorhombic'
             c11             = pars['c11']
             c22             = pars['c22']
             c33             = pars['c33']
@@ -209,7 +222,7 @@ class ElasticSolid:
         Gmat = np.swapaxes(Gtens, 2, 1).reshape(3*self.idx, 3*self.idx)
         return Gmat
 
-    def resonance_frequencies (self, pars=None, nb_freq=None, eigvals_only=True):
+    def resonance_frequencies (self, pars, nb_freq, eigvals_only=True):
         """
         calculates resonance frequencies in Hz;
         pars: dictionary of elastic constants
@@ -218,10 +231,10 @@ class ElasticSolid:
         """
 
         
-        if nb_freq==None:
-            nb_freq = self.nb_freq   
-        if pars is None:
-            pars = self.init_elasticConstants_dict
+        # if nb_freq==None:
+        #     nb_freq = self.nb_freq   
+        # if pars is None:
+        #     pars = self.init_elasticConstants_dict
 
         Gmat = self.G_mat(pars)
         if eigvals_only==True:
@@ -238,13 +251,13 @@ class ElasticSolid:
 
 
 
-    def log_derivatives_analytical (self, pars):
+    def log_derivatives_analytical (self, pars, nb_freq):
         """
         calculating logarithmic derivatives of the resonance frequencies with respect to elastic constants,
         i.e. (df/dc)*(c/f), following Arkady's paper
         """
-        f, a = self.resonance_frequencies(pars, eigvals_only=False)
-        derivative_matrix = np.zeros((self.nb_freq, len(pars)))
+        f, a = self.resonance_frequencies(pars, nb_freq, eigvals_only=False)
+        derivative_matrix = np.zeros((nb_freq, len(pars)))
         ii = 0
         for direction, value in pars.items():
             Cderivative_dict = {key: 0 for key in pars}
@@ -253,7 +266,7 @@ class ElasticSolid:
             for idx, res in enumerate(f):
                 derivative_matrix[idx, ii] = np.matmul(a[idx], np.matmul(Gmat_derivative, a[idx]) ) / res * 2*np.pi * value
             ii += 1
-        log_derivative = np.zeros((self.nb_freq, len(pars)))
+        log_derivative = np.zeros((nb_freq, len(pars)))
         for idx, der in enumerate(derivative_matrix):
             log_derivative[idx] = der / sum(der)
         
@@ -279,7 +292,7 @@ class ElasticSolid:
 
 
 
-    def log_derivatives_numerical (self, pars=None, dc=1e5, N=5, Rsquared_threshold=1e-5, parallel=False, nb_workers=None ):
+    def log_derivatives_numerical (self, pars, nb_freq, dc=1e5, N=5, Rsquared_threshold=1e-5, parallel=False, nb_workers=None ):
         """
         calculating logarithmic derivatives of the resonance frequencies with respect to elastic constants,
         i.e. (df/dc)*(c/f), by calculating the resonance frequencies for slowly varying elastic constants
@@ -287,20 +300,18 @@ class ElasticSolid:
         The derivative is calculated by computing resonance frequencies for N different elastic cosntants centered around the value given in pars and spaced by dc.
         A line is then fitted through these points and the slope is extracted as the derivative.
         """
-        if pars is None:
-            pars = self.init_elasticConstants_dict
         if nb_workers is None:
             nb_workers = min( [int(cpu_count()/2), N] )
 
 
         # calculate the resonance frequencies for the "true" elastic constants
-        freq_result = self.resonance_frequencies(pars=pars)
+        freq_result = self.resonance_frequencies(pars=pars, nb_freq=nb_freq)
 
 
         if parallel == True:
-                print("# of available cores: ", cpu_count())
+                # print("# of available cores: ", cpu_count())
                 pool = Pool(processes=nb_workers)
-                print("--- Pool initialized with ", nb_workers, " workers ---")
+                # print("--- Pool initialized with ", nb_workers, " workers ---")
         
 
         fit_results_dict = {}
@@ -309,8 +320,8 @@ class ElasticSolid:
         # take derivatives with respect to all elastic constants
         ii = 0
         for elastic_constant in pars:
-            print ('start taking derivative with respect to ', elastic_constant)
-            t1 = time()
+            # print ('start taking derivative with respect to ', elastic_constant)
+            # t1 = time()
             # create an array of elastic constants centered around the "true" value
             c_result = pars[elastic_constant]
             c_derivative_array = np.linspace(c_result-N/2*dc, c_result+N/2*dc, N)
@@ -331,12 +342,13 @@ class ElasticSolid:
             if parallel == True:
                 # print("# of available cores: ", cpu_count())
                 # pool = Pool(processes=nb_workers)
-                freq_derivative_matrix = pool.map(self.resonance_frequencies, elasticConstants_derivative_array) - np.array([freq_result for _ in np.arange(N)])
+                elasticConstants_derivative_array = [(c, nb_freq) for c in elasticConstants_derivative_array]
+                freq_derivative_matrix = pool.starmap(self.resonance_frequencies, elasticConstants_derivative_array) - np.array([freq_result for _ in np.arange(N)])
                 freq_derivative_matrix = np.transpose( np.array( freq_derivative_matrix ) )
             else:
                 freq_derivative_matrix = np.zeros([len(freq_result), N])
                 for idx, parameter_set in enumerate(elasticConstants_derivative_array):
-                    freq_derivative_matrix[:, idx] = self.resonance_frequencies(pars=parameter_set) - freq_result
+                    freq_derivative_matrix[:, idx] = self.resonance_frequencies(pars=parameter_set, nb_freq=nb_freq) - freq_result
 
 
             # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -355,7 +367,6 @@ class ElasticSolid:
             fit_matrix = np.zeros([len(freq_result), N])
             # here we fit a straight line to the resonance frequency vs elastic costants for all resonances
             for idx, freq_derivative_array in enumerate(freq_derivative_matrix):
-                # popt, pcov = curve_fit(line, Ctest, freq, p0=[1e-7, 0])
                 slope, y_intercept = np.polyfit(c_derivative_array, freq_derivative_array, 1)
                 log_derivative_matrix[idx, ii] = 2 * slope * pars[elastic_constant]/freq_result[idx]
 
@@ -390,28 +401,28 @@ class ElasticSolid:
                 'Rsquared': Rsquared_matrix
             }
 
-            print ('derivative with respect to ', elastic_constant, ' done in ', round(time()-t1, 4), ' s')
+            # print ('derivative with respect to ', elastic_constant, ' done in ', round(time()-t1, 4), ' s')
             ii += 1
 
         if parallel == True:
             pool.terminate()
 
         # print the logarithmic derivatives of each frequency
-        formats = "{0:<15}{1:<15}"
-        k = 2
-        for _ in log_derivative_matrix[0]:
-            formats = formats + '{' + str(k) + ':<15}'
-            k+=1
-        print ('-----------------------------------------------------------------------')
-        print ('-----------------------------------------------------------------------')
-        print ('2 x LOGARITHMIC DERIVATIVES')
-        print ('-----------------------------------------------------------------------')
-        print (formats.format('f [MHz]','dlnf/dlnc11','dlnf/dlnc12','dlnf/dlnc44','SUM') )
-        for idx, line in enumerate(log_derivative_matrix):
-            text = [str(round(freq_result[idx]/1e6,6))] + [str(round(d, 6)) for d in line] + [str(round(sum(line),7))]
-            print ( formats.format(*text) )
-        print ('-----------------------------------------------------------------------')
-        print ('-----------------------------------------------------------------------')
+        # formats = "{0:<15}{1:<15}"
+        # k = 2
+        # for _ in log_derivative_matrix[0]:
+        #     formats = formats + '{' + str(k) + ':<15}'
+        #     k+=1
+        # print ('-----------------------------------------------------------------------')
+        # print ('-----------------------------------------------------------------------')
+        # print ('2 x LOGARITHMIC DERIVATIVES')
+        # print ('-----------------------------------------------------------------------')
+        # print (formats.format('f [MHz]','dlnf/dlnc11','dlnf/dlnc12','dlnf/dlnc44','SUM') )
+        # for idx, line in enumerate(log_derivative_matrix):
+        #     text = [str(round(freq_result[idx]/1e6,6))] + [str(round(d, 6)) for d in line] + [str(round(sum(line),7))]
+        #     print ( formats.format(*text) )
+        # print ('-----------------------------------------------------------------------')
+        # print ('-----------------------------------------------------------------------')
     
         return (log_derivative_matrix)
 
@@ -424,36 +435,79 @@ class ElasticSolid:
     # everything below will be fit algorithms
     # ->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->
     # ->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->
+    def assignement(self, freqs_data, freqs_sim):
+        """
+        Linear assigment of the simulated frequencies to the data frequencies
+        in case there is one or more missing frequencies in the data
+        """
+        cost_matrix = distance_matrix(freqs_data[:, None], freqs_sim[:, None])**2
+        ## sim_index is the indices for freqs_sim to match freqs_data
+        index_sim = linear_sum_assignment(cost_matrix)[1]
 
+        ## Give indices of the missing frequencies in the data
+        bool_missing = np.ones(freqs_sim.size, dtype=bool)
+        bool_missing[index_sim] = False
+        index_missing = np.arange(0, freqs_sim.size, 1)[bool_missing]
+        index_missing = index_missing[index_missing < self.freqs_data.size]
 
+        return index_sim, index_missing, freqs_sim[index_sim]
+
+    
     def residual_function (self, pars):
         """
         define the residual function used in lmfit;
         i.e. (simulated resonance frequencies - data)
         """
-        freqs_sim = self.resonance_frequencies(pars=pars, nb_freq=self.nb_freq)
+        freqs_sim = self.resonance_frequencies(pars=pars, nb_freq=self.nb_freq+self.nb_missing_res)
         freqs_exp = self.freqs_data[:self.nb_freq]
-        delta = freqs_sim - freqs_exp
+
+        if self.nb_missing_res > 0:
+            self.matching_idx, self.missing_idx, freqs_sim_matched = self.assignement(freqs_exp, freqs_sim)
+            delta = freqs_sim_matched - freqs_exp
+        else:
+            delta = freqs_sim - freqs_exp
         
         print ('call number ', self.call)
         pars.pretty_print(columns=['value', 'min', 'max', 'vary'])
         self.call += 1
         return delta
 
-
-    def fit (self):
-        self.freqs_data = self.load_data()
     
+    def fit (self):
+        self.call = 0
         if method == 'differential_evolution':
             out = minimize(self.residual_function, self.params, method=method, polish=True)
+        if method == 'leastsq':
+            out = minimize(self.residual_function, self.params, method=method)
+        else:
+            print ('your fit method is not a valid method')
         
         ## Display fit report
         report_fit(out)
+        self.print_results(out)
+        return 1
+
+    
+    def print_results (self, lmfit_out):
+        """
+        create a nice printable output of the fit results and derivatives
+        """
+        print ()
+        print ('->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->')
+        print ('->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->')
+        print ()
+        formats = "{0:<33}{1:<10}"
+        print ( formats.format(*['Crystal Structure:', self.crystal_structure]) )
+        print ( formats.format(*['Mass (mg):', self.mass*1e6]) )
+        print ( formats.format(*['Sample Dimensions (mm):',str(np.array(self.dimensions)*1e3)]) )
+        print ( formats.format(*['Highest Order Basis Polynomial:', self.order]) )
+        print ( formats.format(*['Number Of Calls:', self.call]) )
+        print ()
         print ('->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->')
         print ('->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->')
         print ()
         formats = "{0:<7}{1:<10}{2:<5}{3:<12}{4:<12}{5:<30}{6:<20}"
-        for name, param in out.params.items():
+        for name, param in lmfit_out.params.items():
             self.fit_results[name] = param.value
             text = [name+' =', '('+ str(round(param.value/1e9,3)), '+/-', str(round(param.stderr/1e9, 3))+') GPa', '('+str(round(param.stderr/param.value*100,2))+'%);', 'bounds (GPa): '+str(np.array(self.elasticConstants_bounds[name])/1e9)+';', 'init value = '+str(round(self.init_elasticConstants_dict[name]/1e9,3))+' GPa']
             print ( formats.format(*text) )
@@ -461,9 +515,10 @@ class ElasticSolid:
         print ('->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->')
         print ('->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->')
         print ()
-        fsim = self.resonance_frequencies(pars=self.fit_results)
-        log_der = self.log_derivatives_analytical (self.fit_results)
-        formats = "{0:<8}{1:<15}{2:<15}{3:<17}"
+        fsim = self.resonance_frequencies(pars=self.fit_results, nb_freq=self.nb_freq+self.nb_missing_res+10)
+        log_der = self.log_derivatives_analytical (self.fit_results, self.nb_freq+self.nb_missing_res+10)
+        # log_der = self.log_derivatives_numerical (self.fit_results, self.nb_freq+self.nb_missing_res+10, parallel=True)
+        formats = "{0:<8}{1:<15}{2:<15}{3:<23}"
         header_text = ['index', 'f exp (MHz)', 'f calc (MHz)', 'difference (%)']
         nb = 4
         for c in self.fit_results:
@@ -471,18 +526,25 @@ class ElasticSolid:
             header_text = header_text + ['2*df/dln'+c]
             nb +=1
         print(formats.format(*header_text))
-        for idx, _ in enumerate(self.freqs_data[:self.nb_freq]):
-            text = [idx, round(self.freqs_data[idx]/1e6, 5), round(fsim[idx]/1e6,5), round((self.freqs_data[idx]-fsim[idx])/self.freqs_data[idx]*100,5)]
-            derivatives = list(np.round(log_der[idx],6))
-            text = text + derivatives
+        print ()
+        idx_exp = 0
+        for idx_sim in np.arange(self.nb_freq+self.nb_missing_res+10):
+            if idx_sim in self.missing_idx:
+                text_f = [idx_sim, 0, round(fsim[idx_sim]/1e6,5), 0]
+                derivatives = list(log_der[idx_sim]*0)
+            elif idx_sim < self.nb_freq+self.nb_missing_res:
+                text_f = [idx_sim, round(self.freqs_data[idx_exp]/1e6, 5), round(fsim[idx_sim]/1e6,5), round((self.freqs_data[idx_exp]-fsim[idx_sim])/self.freqs_data[idx_exp]*100,5)]
+                idx_exp += 1
+                derivatives = list(np.round(log_der[idx_sim],6))
+            else:
+                text_f = [idx_sim, '', round(fsim[idx_sim]/1e6,5), '']
+                derivatives = [''] * len(log_der[idx_sim])
+            text = text_f + derivatives
             print ( formats.format(*text) )
         print ()
         print ('->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->')
         print ('->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->')
-        
         return 1
-
-
 
 
 
@@ -511,18 +573,30 @@ if __name__ == '__main__':
         'c44': True
         }
 
-    nb_freq = 80
+    nb_freq = 50
+    nb_missing_freq = 10
     method = 'differential_evolution'
+    method = 'leastsq'
 
     freqs_file = "C:\\Users\\Florian\\Box Sync\\Code\\Resonant_Ultrasound_Spectroscopy\\elastic_constants\\test\\SrTiO3_RT_frequencies.txt"
 
 
     t0 = time()
     print ('initialize the class ...')
-    srtio3 = ElasticSolid(initElasticConstants_dict, ElasticConstants_bounds, ElasticConstants_vary, mass, dimensions, order, nb_freq, method, freqs_file)
+    srtio3 = ElasticSolid(initElasticConstants_dict, ElasticConstants_bounds, ElasticConstants_vary, mass, dimensions, order, nb_freq, method, freqs_file, nb_missing_freq)
     print ('class initialized in ', round(time()-t0, 4), ' s')
 
+
+    # exp = srtio3.load_data()[:nb_freq]
+    # sim = srtio3.resonance_frequencies(pars=initElasticConstants_dict, nb_freq=nb_freq+nb_missing_freq, eigvals_only=True)
+    # idx, simu = srtio3.assignement(exp, sim)
+    # simu = simu/1e6
+
+    # print (idx, simu)
+
     srtio3.fit()
+    # print (srtio3.matching_idx)
+    # print (srtio3.missing_idx)
 
     # f = srtio3.resonance_frequencies()
     # print(f/1e6)
