@@ -556,7 +556,7 @@ class ElasticSolid:
         fsim = self.resonance_frequencies(pars=self.fit_results, nb_freq=self.nb_freq+self.nb_missing_res+10)
         log_der = self.log_derivatives_analytical (self.fit_results, self.nb_freq+self.nb_missing_res+10)
         # log_der = self.log_derivatives_numerical (self.fit_results, self.nb_freq+self.nb_missing_res+10, parallel=True)
-        formats = "{0:<8}{1:<15}{2:<15}{3:<23}"
+        formats = "{0:<9}{1:<15}{2:<15}{3:<23}"
         header_text = ['index', 'f exp (MHz)', 'f calc (MHz)', 'difference (%)']
         nb = 4
         for c in self.fit_results:
@@ -568,24 +568,38 @@ class ElasticSolid:
         print ()
         total_text = total_text + '' + '\n'
         idx_exp = 0
+        difference = []
         for idx_sim in np.arange(self.nb_freq+self.nb_missing_res+10):
             if idx_sim in self.missing_idx:
                 text_f = [idx_sim, 0, round(fsim[idx_sim]/1e6,5), 0]
                 derivatives = list(log_der[idx_sim]*0)
-                text = '# ' + formats.format(*(text_f + derivatives))
+                text = '#' + formats.format(*(text_f + derivatives))
             elif idx_sim < self.nb_freq+self.nb_missing_res:
                 text_f = [idx_sim, round(self.freqs_data[idx_exp]/1e6, 5), round(fsim[idx_sim]/1e6,5), round((self.freqs_data[idx_exp]-fsim[idx_sim])/self.freqs_data[idx_exp]*100,5)]
-                idx_exp += 1
                 derivatives = list(np.round(log_der[idx_sim],6))
                 text = formats.format(*(text_f + derivatives))
+                difference.append((self.freqs_data[idx_exp]-fsim[idx_sim])/self.freqs_data[idx_exp])
+                idx_exp += 1
             else:
                 text_f = [idx_sim, '', round(fsim[idx_sim]/1e6,5), '']
                 derivatives = [''] * len(log_der[idx_sim])
-                text = '# ' + formats.format(*(text_f + derivatives))
+                text = '#' + formats.format(*(text_f + derivatives))
             
             total_text = total_text + text + '\n'
             print ( text )
         print ()
+        total_text = total_text + '#' + '\n'
+        print (divider)
+        total_text = total_text + divider + '\n'
+        print()
+        total_text = total_text + '#' + '\n'
+
+        difference = np.array(difference)
+        rms = np.sqrt(sum(difference**2)) / len(difference) * 100
+        print (' RMS = ', round(rms, 3), ' %' )
+        total_text = total_text + "# RMS = " + str( round( rms, 3 ) ) + ' %\n'
+
+        print()
         total_text = total_text + '#' + '\n'
         print (divider)
         total_text = total_text + divider + '\n'
