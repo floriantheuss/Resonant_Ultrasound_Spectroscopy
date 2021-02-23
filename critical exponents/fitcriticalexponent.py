@@ -69,21 +69,25 @@ class CriticalExponentFit:
         A1g3 = data[3]
         # E1g = data[4]
         E2g = data[5]
-        dA1g1 = data[6]
-        dA1g2 = data[7]
-        dA1g3 = data[8]
-        # dE1g = data[9]
-        dE2g = data[10]
         Bulk = ( A1g1 * A1g2 - A1g3**2 ) / ( A1g1 + A1g2 - 2*A1g3 )
-        dBulk = np.sqrt( ((A1g2-A1g3)**2*dA1g1)**2 + ((A1g1-A1g3)**2*dA1g2)**2 + (2*(A1g1-A1g3)*(A1g2-A1g3)*dA1g3)**2 ) / (A1g1+A1g2-2*A1g3)**2
+        if self.include_errors == True:
+            dA1g1 = data[6]
+            dA1g2 = data[7]
+            dA1g3 = data[8]
+            # dE1g = data[9]
+            dE2g = data[10]
+            dBulk = np.sqrt( ((A1g2-A1g3)**2*dA1g1)**2 + ((A1g1-A1g3)**2*dA1g2)**2 + (2*(A1g1-A1g3)*(A1g2-A1g3)*dA1g3)**2 ) / (A1g1+A1g2-2*A1g3)**2       
+        
         
         self.T = T
         if self.type == 'E2g':
             self.elastic_constant = E2g
-            self.error = dE2g
+            if self.include_errors == True:
+                self.error = dE2g
         elif self.type == 'Bulk':
             self.elastic_constant = Bulk
-            self.error = dBulk
+            if self.include_errors == True:
+                self.error = dBulk
         else:
             print ('give a different type of elastic constant to fit')
         return 0
@@ -386,11 +390,14 @@ class CriticalExponentFit:
             sim = np.append(C1, C2) + C + D*Tsim
 
             # plot the fit result
-            ax.plot(Tsim, sim, zorder=2, c='tab:orange', label='$\\mathrm{C_{E_{2g}}}$', linewidth=3)
+            ax.plot(Tsim, sim, zorder=2, c='tab:orange', label='$\\mathrm{C_{E_{2g}}}$', linewidth=2)
             # plot the measured data
-            ax.fill_between(self.T, self.elastic_constant-self.error, self.elastic_constant+self.error, alpha=0.3, facecolor='lightgrey', zorder=-1)
-            ax.plot(self.T, self.elastic_constant, c='black', zorder=-2, linewidth=3)
-            ax.plot(self.T[np.invert(self.exponent_mask)], self.elastic_constant[np.invert(self.exponent_mask)], c='lightgrey', linewidth=3, zorder=1)
+            ax.fill_between(self.T, self.elastic_constant-self.error, self.elastic_constant+self.error, alpha=0.3, facecolor='grey', zorder=-1)
+            mask_left = self.exponent_mask & (self.T < Tc)
+            mask_right = self.exponent_mask & (self.T > Tc)
+            ax.plot(self.T[mask_left], self.elastic_constant[mask_left], c='black', zorder=-2, linewidth=5)
+            ax.plot(self.T[mask_right], self.elastic_constant[mask_right], c='black', zorder=-2, linewidth=5)
+            ax.plot(self.T[np.invert(self.exponent_mask)], self.elastic_constant[np.invert(self.exponent_mask)], c='darkgray', linewidth=5, zorder=1)
 
             plt.ylabel('Bulk Modulus (GPa)', fontsize=18)
 

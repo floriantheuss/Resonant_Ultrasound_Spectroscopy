@@ -13,7 +13,7 @@ from scipy.optimize import linear_sum_assignment
 class ElasticSolid:
 
     # instance attributes
-    def __init__(self, initElasticConstants_dict, ElasticConstants_bounds, ElasticConstants_vary, mass, dimensions, order, nb_freq=None, method='differential_evolution', freqs_file=None, nb_missing_res=0):
+    def __init__(self, initElasticConstants_dict, ElasticConstants_bounds, ElasticConstants_vary, mass, dimensions, order, nb_freq=0, method='differential_evolution', freqs_file=None, nb_missing_res=0, maxiter=1000):
         """
         initElasticConstants_dict: a dictionary of elastic constants in Pa
         mass: a number in kg
@@ -41,13 +41,16 @@ class ElasticSolid:
         self.freqs_file = freqs_file
         self.freqs_data = self.load_data()
         
-        if nb_freq == None:
+        if nb_freq == 0:
             self.nb_freq = len(self.freqs_data)
         else:
             self.nb_freq = nb_freq
         self.nb_missing_res = nb_missing_res
         self.matching_idx = np.array([])
         self.missing_idx = np.array([])
+
+        # maximum number of iterations in fit
+        self.maxiter = maxiter
 
 
         
@@ -119,6 +122,12 @@ class ElasticSolid:
             c13 = c23       = pars['c13']
             c44 = c55       = pars['c44']
             c66             = (pars['c11']-pars['c12'])/2
+            # c11 = c22       = 2*pars['c66'] + pars['c12']
+            # c33             = pars['c33']
+            # c12             = pars['c12']
+            # c13 = c23       = pars['c13']
+            # c44 = c55       = pars['c44']
+            # c66             = pars['c66']
         
         elif len(pars) == 6:                    # tetragonal
             self.crystal_structure = 'tetragonal'
@@ -150,9 +159,9 @@ class ElasticSolid:
         ctens[0,0,1,1] = ctens[1,1,0,0] = c12
         ctens[2,2,0,0] = ctens[0,0,2,2] = c13
         ctens[1,1,2,2] = ctens[2,2,1,1] = c23
-        ctens[0,1,0,1] = ctens[1,0,0,1] = ctens[0,1,1,0] = ctens[1,0,1,0] = c44
+        ctens[0,1,0,1] = ctens[1,0,0,1] = ctens[0,1,1,0] = ctens[1,0,1,0] = c66
         ctens[0,2,0,2] = ctens[2,0,0,2] = ctens[0,2,2,0] = ctens[2,0,2,0] = c55
-        ctens[1,2,1,2] = ctens[2,1,2,1] = ctens[2,1,1,2] = ctens[1,2,2,1] = c66
+        ctens[1,2,1,2] = ctens[2,1,2,1] = ctens[2,1,1,2] = ctens[1,2,2,1] = c44
 
         return ctens
 
@@ -259,16 +268,21 @@ class ElasticSolid:
         f, a = self.resonance_frequencies(pars, nb_freq, eigvals_only=False)
         derivative_matrix = np.zeros((nb_freq, len(pars)))
         ii = 0
-        for direction, value in pars.items():
+
+
+        for direction in sorted(pars):
+            value = pars[direction]
             Cderivative_dict = {key: 0 for key in pars}
+            # Cderivative_dict = {'c11': 0,'c22': 0, 'c33': 0, 'c13': 0, 'c23': 0, 'c12': 0, 'c44': 0, 'c55': 0, 'c66': 0}
             Cderivative_dict[direction] = 1
             Gmat_derivative = self.G_mat(Cderivative_dict)
             for idx, res in enumerate(f):
-                derivative_matrix[idx, ii] = np.matmul(a[idx], np.matmul(Gmat_derivative, a[idx]) ) / res * 2*np.pi * value
+                derivative_matrix[idx, ii] = np.matmul(a[idx].T, np.matmul(Gmat_derivative, a[idx]) ) / (res**2) * value
             ii += 1
         log_derivative = np.zeros((nb_freq, len(pars)))
         for idx, der in enumerate(derivative_matrix):
             log_derivative[idx] = der / sum(der)
+            
         
         # print the logarithmic derivatives of each frequency
         # formats = "{0:<15}{1:<15}"
@@ -319,7 +333,7 @@ class ElasticSolid:
         log_derivative_matrix = np.zeros([len(freq_result), len(pars)])
         # take derivatives with respect to all elastic constants
         ii = 0
-        for elastic_constant in pars:
+        for elastic_constant in sorted(pars):
             # print ('start taking derivative with respect to ', elastic_constant)
             # t1 = time()
             # create an array of elastic constants centered around the "true" value
@@ -448,7 +462,7 @@ class ElasticSolid:
         bool_missing = np.ones(freqs_sim.size, dtype=bool)
         bool_missing[index_sim] = False
         index_missing = np.arange(0, freqs_sim.size, 1)[bool_missing]
-        index_missing = index_missing[index_missing < self.freqs_data.size]
+        # index_missing = index_missing[index_missing < self.freqs_data.size]
 
         return index_sim, index_missing, freqs_sim[index_sim]
 
@@ -476,15 +490,16 @@ class ElasticSolid:
     def fit (self):
         self.call = 0
         if method == 'differential_evolution':
-            out = minimize(self.residual_function, self.params, method=method, polish=True)
-        if method == 'leastsq':
+            out = minimize(self.residual_function, self.params, method=method, polish=True, maxiter=self.maxiter)
+        elif method == 'leastsq':
             out = minimize(self.residual_function, self.params, method=method)
         else:
             print ('your fit method is not a valid method')
         
         ## Display fit report
         report_fit(out)
-        self.print_results(out)
+        result_text = self.print_results(out)
+        self.save_results(result_text)
         return 1
 
     
@@ -492,29 +507,52 @@ class ElasticSolid:
         """
         create a nice printable output of the fit results and derivatives
         """
+        total_text = ''
+        divider = '#->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->'
         print ()
-        print ('->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->')
-        print ('->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->')
+        print (divider)
+        total_text = total_text + divider + '\n'
+        print (divider)
+        total_text = total_text + divider + '\n'
         print ()
+        total_text = total_text + '#' + '\n'
         formats = "{0:<33}{1:<10}"
         print ( formats.format(*['Crystal Structure:', self.crystal_structure]) )
+        total_text = total_text + '# ' + formats.format(*['Crystal Structure:', self.crystal_structure]) + '\n'
         print ( formats.format(*['Mass (mg):', self.mass*1e6]) )
+        total_text = total_text + '# ' + formats.format(*['Mass (mg):', self.mass*1e6]) + '\n'
         print ( formats.format(*['Sample Dimensions (mm):',str(np.array(self.dimensions)*1e3)]) )
+        total_text = total_text + '# ' + formats.format(*['Sample Dimensions (mm):',str(np.array(self.dimensions)*1e3)]) + '\n'
         print ( formats.format(*['Highest Order Basis Polynomial:', self.order]) )
+        total_text = total_text + '# ' + formats.format(*['Highest Order Basis Polynomial:', self.order]) + '\n'
         print ( formats.format(*['Number Of Calls:', self.call]) )
+        total_text = total_text + '# ' + formats.format(*['Number Of Calls:', self.call]) + '\n'
         print ()
-        print ('->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->')
-        print ('->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->')
+        total_text = total_text + '#' + '\n'
+        print (divider)
+        total_text = total_text + divider + '\n'
+        print (divider)
+        total_text = total_text + divider + '\n'
         print ()
+        total_text = total_text + '#' + '\n'
         formats = "{0:<7}{1:<10}{2:<5}{3:<12}{4:<12}{5:<30}{6:<20}"
-        for name, param in lmfit_out.params.items():
+        for name in sorted(lmfit_out.params):
+            param = lmfit_out.params[name]
             self.fit_results[name] = param.value
+            if param.stderr == None:
+                param.stderr = 0
             text = [name+' =', '('+ str(round(param.value/1e9,3)), '+/-', str(round(param.stderr/1e9, 3))+') GPa', '('+str(round(param.stderr/param.value*100,2))+'%);', 'bounds (GPa): '+str(np.array(self.elasticConstants_bounds[name])/1e9)+';', 'init value = '+str(round(self.init_elasticConstants_dict[name]/1e9,3))+' GPa']
-            print ( formats.format(*text) )
+            text = formats.format(*text)
+            total_text = total_text + '# ' + text + '\n'
+            print ( text )
         print ()
-        print ('->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->')
-        print ('->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->')
+        total_text = total_text + '#' + '\n'
+        print (divider)
+        total_text = total_text + divider + '\n'
+        print (divider)
+        total_text = total_text + divider + '\n'
         print ()
+        total_text = total_text + '#' + '\n'
         fsim = self.resonance_frequencies(pars=self.fit_results, nb_freq=self.nb_freq+self.nb_missing_res+10)
         log_der = self.log_derivatives_analytical (self.fit_results, self.nb_freq+self.nb_missing_res+10)
         # log_der = self.log_derivatives_numerical (self.fit_results, self.nb_freq+self.nb_missing_res+10, parallel=True)
@@ -526,64 +564,128 @@ class ElasticSolid:
             header_text = header_text + ['2*df/dln'+c]
             nb +=1
         print(formats.format(*header_text))
+        total_text = total_text + '# ' + formats.format(*header_text) + '\n'
         print ()
+        total_text = total_text + '' + '\n'
         idx_exp = 0
         for idx_sim in np.arange(self.nb_freq+self.nb_missing_res+10):
             if idx_sim in self.missing_idx:
                 text_f = [idx_sim, 0, round(fsim[idx_sim]/1e6,5), 0]
                 derivatives = list(log_der[idx_sim]*0)
+                text = '# ' + formats.format(*(text_f + derivatives))
             elif idx_sim < self.nb_freq+self.nb_missing_res:
                 text_f = [idx_sim, round(self.freqs_data[idx_exp]/1e6, 5), round(fsim[idx_sim]/1e6,5), round((self.freqs_data[idx_exp]-fsim[idx_sim])/self.freqs_data[idx_exp]*100,5)]
                 idx_exp += 1
                 derivatives = list(np.round(log_der[idx_sim],6))
+                text = formats.format(*(text_f + derivatives))
             else:
                 text_f = [idx_sim, '', round(fsim[idx_sim]/1e6,5), '']
                 derivatives = [''] * len(log_der[idx_sim])
-            text = text_f + derivatives
-            print ( formats.format(*text) )
+                text = '# ' + formats.format(*(text_f + derivatives))
+            
+            total_text = total_text + text + '\n'
+            print ( text )
         print ()
-        print ('->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->')
-        print ('->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->->')
-        return 1
+        total_text = total_text + '#' + '\n'
+        print (divider)
+        total_text = total_text + divider + '\n'
+        print (divider)
+        total_text = total_text + divider + '\n'
+
+        return total_text
+
+    
+    def save_results (self, text):
+        save_path = self.freqs_file[:-4] + '_out.txt'
+        with open(save_path, 'w') as g:
+            g.write(text)
 
 
 
 
 if __name__ == '__main__':
 
-    order = 10
-    mass = 0.045e-3
-    dimensions = np.array([0.145e-2, 0.201e-2, 0.302e-2])
+    # order = 10
+    # mass = 0.045e-3
+    # dimensions = np.array([0.145e-2, 0.201e-2, 0.302e-2])
+
+    # initElasticConstants_dict = {
+    #     'c11': 321.61990e9,
+    #     'c12': 103.50101e9,
+    #     'c44': 124.99627e9
+    #     }
+
+    # ElasticConstants_bounds = {
+    #     'c11': [280e9, 350e9],
+    #     'c12': [50e9, 150e9],
+    #     'c44': [80e9, 180e9]
+    #     }
+        
+    # ElasticConstants_vary = {
+    #     'c11': True,
+    #     'c12': True,
+    #     'c44': True
+    #     }
+
+    # nb_freq = 50
+    # nb_missing_freq = 10
+    # maxiter = 1
+    # method = 'differential_evolution'
+    # # method = 'leastsq'
+
+    # freqs_file = "C:\\Users\\Florian\\Box Sync\\Code\\Resonant_Ultrasound_Spectroscopy\\elastic_constants\\test\\SrTiO3_RT_frequencies.txt"
+
+    # --------------------------------------------------------------------------------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------------------------------------------------------------------------------------
+    # Mn3.1Sn0.98
+    order = 12
+    nb_freq = 0
+    nb_missing_freq = 5
+    maxiter = 10
+    method = 'differential_evolution'
+    method = 'leastsq'
+
+
+    freqs_file = "C:\\Users\\Florian\\Box Sync\\Code\\Resonant_Ultrasound_Spectroscopy\\elastic_constants\\test\\Mn3.1Sn0.98.txt"
+
+    mass = 0.00855e-3
+    dimensions = np.array([0.935e-3, 1.010e-3, 1.231e-3])
 
     initElasticConstants_dict = {
-        'c11': 321.61990e9,
-        'c12': 103.50101e9,
-        'c44': 124.99627e9
+        'c11': 123.568e9,
+        # 'c66': 45e9,
+        'c12': 33.712e9,
+        'c13': 18.007e9,
+        'c33': 142.772e9,
+        'c44': 42.446e9
         }
+        
 
     ElasticConstants_bounds = {
-        'c11': [280e9, 350e9],
-        'c12': [50e9, 150e9],
-        'c44': [80e9, 180e9]
+        'c11': [110e9, 140e9],
+        # 'c66': [30e9, 60e9],
+        'c12': [20e9, 50e9],
+        'c13': [0, 30e9],
+        'c33': [125e9, 155e9],
+        'c44': [30e9, 60e9]
         }
         
     ElasticConstants_vary = {
         'c11': True,
+        # 'c66': True,
         'c12': True,
+        'c13': True,
+        'c33': True,
         'c44': True
         }
 
-    nb_freq = 50
-    nb_missing_freq = 10
-    method = 'differential_evolution'
-    method = 'leastsq'
-
-    freqs_file = "C:\\Users\\Florian\\Box Sync\\Code\\Resonant_Ultrasound_Spectroscopy\\elastic_constants\\test\\SrTiO3_RT_frequencies.txt"
+    
 
 
     t0 = time()
     print ('initialize the class ...')
-    srtio3 = ElasticSolid(initElasticConstants_dict, ElasticConstants_bounds, ElasticConstants_vary, mass, dimensions, order, nb_freq, method, freqs_file, nb_missing_freq)
+    srtio3 = ElasticSolid(initElasticConstants_dict, ElasticConstants_bounds, ElasticConstants_vary, mass, dimensions, order, nb_freq, method, freqs_file, nb_missing_freq)#, maxiter=maxiter)
     print ('class initialized in ', round(time()-t0, 4), ' s')
 
 
