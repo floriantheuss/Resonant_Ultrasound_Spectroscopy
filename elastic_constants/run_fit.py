@@ -1,1 +1,0 @@
-from .elasticsolid import ElasticSolid

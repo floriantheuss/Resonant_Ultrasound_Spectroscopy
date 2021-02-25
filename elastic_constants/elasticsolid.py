@@ -653,12 +653,12 @@ if __name__ == '__main__':
     # --------------------------------------------------------------------------------------------------------------------------------------------------------
     # --------------------------------------------------------------------------------------------------------------------------------------------------------
     # Mn3.1Sn0.98
-    order = 12
+    order = 16
     nb_freq = 0
     nb_missing_freq = 5
-    maxiter = 10
+    maxiter = 100
     method = 'differential_evolution'
-    method = 'leastsq'
+    # method = 'leastsq'
 
 
     freqs_file = "C:\\Users\\Florian\\Box Sync\\Code\\Resonant_Ultrasound_Spectroscopy\\elastic_constants\\test\\Mn3.1Sn0.98.txt"
