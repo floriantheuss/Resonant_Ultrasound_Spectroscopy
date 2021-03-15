@@ -1,4 +1,5 @@
 from elastic_solid.elasticconstantswithtemperature import ElasticConstantsTemperatureDependence
+import numpy as np
 
 
 
