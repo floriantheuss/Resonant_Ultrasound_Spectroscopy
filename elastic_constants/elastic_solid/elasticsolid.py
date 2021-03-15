@@ -116,18 +116,18 @@ class ElasticSolid:
 
         elif len(pars) == 5:                    # hexagonal
             self.crystal_structure = 'hexagonal'
-            c11 = c22       = pars['c11']
-            c33             = pars['c33']
-            c12             = pars['c12']
-            c13 = c23       = pars['c13']
-            c44 = c55       = pars['c44']
-            c66             = (pars['c11']-pars['c12'])/2
-            # c11 = c22       = 2*pars['c66'] + pars['c12']
+            # c11 = c22       = pars['c11']
             # c33             = pars['c33']
             # c12             = pars['c12']
             # c13 = c23       = pars['c13']
             # c44 = c55       = pars['c44']
-            # c66             = pars['c66']
+            # c66             = (pars['c11']-pars['c12'])/2
+            c11 = c22       = 2*pars['c66'] + pars['c12']
+            c33             = pars['c33']
+            c12             = pars['c12']
+            c13 = c23       = pars['c13']
+            c44 = c55       = pars['c44']
+            c66             = pars['c66']
         
         elif len(pars) == 6:                    # tetragonal
             self.crystal_structure = 'tetragonal'
@@ -667,8 +667,8 @@ if __name__ == '__main__':
     dimensions = np.array([0.935e-3, 1.010e-3, 1.231e-3])
 
     initElasticConstants_dict = {
-        'c11': 123.568e9,
-        # 'c66': 45e9,
+        # 'c11': 123.568e9,
+        'c66': 45e9,
         'c12': 33.712e9,
         'c13': 18.007e9,
         'c33': 142.772e9,
@@ -677,8 +677,8 @@ if __name__ == '__main__':
         
 
     ElasticConstants_bounds = {
-        'c11': [110e9, 140e9],
-        # 'c66': [30e9, 60e9],
+        # 'c11': [110e9, 140e9],
+        'c66': [30e9, 60e9],
         'c12': [20e9, 50e9],
         'c13': [0, 30e9],
         'c33': [125e9, 155e9],
@@ -686,8 +686,8 @@ if __name__ == '__main__':
         }
         
     ElasticConstants_vary = {
-        'c11': True,
-        # 'c66': True,
+        # 'c11': True,
+        'c66': True,
         'c12': True,
         'c13': True,
         'c33': True,
