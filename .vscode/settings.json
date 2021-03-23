@@ -1,7 +1,3 @@
 {
-    "python.pythonPath": "C:\\ProgramData\\Anaconda3\\python.exe",
-    "terminal.integrated.env.osx": {
-        "PYTHONPATH": "${C:\\Users\\Florian\\Box Sync\\Code\\Resonant_Ultrasound_Spectroscopy\\elastic_constants}"
-    },
-    "python.linting.enabled": true
+    "python.pythonPath": "C:\\ProgramData\\Anaconda3\\python.exe"
 }
