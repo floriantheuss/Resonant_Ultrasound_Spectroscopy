@@ -196,13 +196,13 @@ class ElasticConstantsTemperatureDependence:
         CofT_dict, T = self.elastic_constants(fint, Tint)
         C_irrep = {}
         if self.crystal_structure == 'hexagonal':
-            # C_irrep['A1g1']   =   ( CofT_dict['c11'] + CofT_dict['c12'] ) / 2
-            C_irrep['A1g1']   =   ( CofT_dict['c66'] + CofT_dict['c12'] )
+            C_irrep['A1g1']   =   ( CofT_dict['c11'] + CofT_dict['c12'] ) / 2
+            # C_irrep['A1g1']   =   ( CofT_dict['c66'] + CofT_dict['c12'] )
             C_irrep['A1g2']   =   CofT_dict['c33']
             C_irrep['A1g3']   =   CofT_dict['c13']
-            C_irrep['E1g']    =   4 * CofT_dict['c44']
-            # C_irrep['E2g']    =   ( CofT_dict['c11'] - CofT_dict['c12'] ) / 2
-            C_irrep['E2g']    =   CofT_dict['c66']
+            C_irrep['E1g']    =   CofT_dict['c44']
+            C_irrep['E2g']    =   ( CofT_dict['c11'] - CofT_dict['c12'] ) / 2
+            # C_irrep['E2g']    =   CofT_dict['c66']
 
         dC_irrep = {key: item-item[-1] for key, item in C_irrep.items()}
 
