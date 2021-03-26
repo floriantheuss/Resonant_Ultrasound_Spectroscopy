@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import os.path
 import os
 from scipy.interpolate import interp1d
+import json
 
 
 
@@ -70,9 +71,15 @@ class ElasticConstantsTemperatureDependence:
         for line in f:
             line=line.strip()
             line=line.split()
-            for i in np.arange(number_of_columns):
+            number = min([number_of_columns, len(line)])
+            for i in np.arange(number):
                 line[i] = float(line[i])
-            data.append(np.array(line[:number_of_columns]))
+            if len(line) >= number_of_columns:
+                data.append(np.array(line[:number_of_columns]))
+            else:
+                n_columns = len(line)
+                difference = number_of_columns - n_columns
+                data.append(np.array(line + difference*[0]))
                
         T, f, g = np.array(data).transpose()
         # for idx, _ in enumerate(T):
@@ -196,13 +203,18 @@ class ElasticConstantsTemperatureDependence:
         CofT_dict, T = self.elastic_constants(fint, Tint)
         C_irrep = {}
         if self.crystal_structure == 'hexagonal':
-            C_irrep['A1g1']   =   ( CofT_dict['c11'] + CofT_dict['c12'] ) / 2
-            # C_irrep['A1g1']   =   ( CofT_dict['c66'] + CofT_dict['c12'] )
+            if 'c11' in self.high_T_el_const.keys():
+                C_irrep['A1g1']   =   ( CofT_dict['c11'] + CofT_dict['c12'] ) / 2
+                C_irrep['E2g']    =   ( CofT_dict['c11'] - CofT_dict['c12'] ) / 2
+            elif 'c66' in self.high_T_el_const.keys():
+                C_irrep['A1g1']   =   ( CofT_dict['c66'] + CofT_dict['c12'] )
+                C_irrep['E2g']    =   CofT_dict['c66']
+            else:   
+                print ('A value for either c11 or c66 has to be given at high temperature')
             C_irrep['A1g2']   =   CofT_dict['c33']
             C_irrep['A1g3']   =   CofT_dict['c13']
             C_irrep['E1g']    =   CofT_dict['c44']
-            C_irrep['E2g']    =   ( CofT_dict['c11'] - CofT_dict['c12'] ) / 2
-            # C_irrep['E2g']    =   CofT_dict['c66']
+            
 
         dC_irrep = {key: item-item[-1] for key, item in C_irrep.items()}
 
@@ -231,19 +243,44 @@ class ElasticConstantsTemperatureDependence:
 
     def plot_data (self, fint, Tint):
         plt.figure()
-        for ii, _ in enumerate(fint):
+        for ii, f in enumerate(fint):
             # plt.scatter(self.temperature_raw[ii], self.frequency_raw[ii])
             plt.plot(self.temperature_raw[ii], self.frequency_raw[ii], 'o-')
-            plt.plot(Tint[ii], fint[ii])
+            # plt.plot(Tint[ii], (f-max(f))/(max(f)-min(f)) + ii)
         
         plt.xlim(min(Tint[0]), max(Tint[0]))
         plt.xlabel('Temperature (K)')
         plt.ylabel('Frequency (MHz)')
+
+        plt.figure()
+        for ii, _ in enumerate(fint):
+            dfdT = np.gradient(fint[ii], Tint[ii])
+            plt.plot(Tint[ii], (dfdT-max(dfdT))/(max(dfdT)-min(dfdT)) + ii, 'o-')
+        
+        plt.xlim(min(Tint[0]), max(Tint[0]))
+        plt.xlabel('Temperature (K)')
+        plt.ylabel('df/dT (arb. units')
+
+    
+    def save_data (self, C_dict, T, save_path):
+        c_save = {}
+        for key, item in C_dict.items():
+            c_save[key] = list(item)
+        report = {
+            'elastic constants': c_save,
+            'temperature': list(T)
+        }
+        with open(save_path, 'w') as f:
+            json.dump(report, f, indent=4)
+        return (1)
+
     
 
     def do_everything (self):
         Tint, fint, gint = self.interpolate()
         C_irrep, dC_irrep, T = self.get_irreps(fint, Tint)
+
+        self.save_data(C_irrep, T, self.fit_path[:-4]+'_elastic_constants.json')
         
         self.plot_data(fint, Tint)
         self.plot_irreps (dC_irrep, T, '$\\Delta \\mathrm{c}$ (GPa) ')
