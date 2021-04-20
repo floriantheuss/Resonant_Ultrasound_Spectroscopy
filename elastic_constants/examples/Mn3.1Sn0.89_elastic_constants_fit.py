@@ -5,18 +5,20 @@ from time import time
 
 
 # Mn3.1Sn0.98
-order = 16
-nb_freq = 0
-nb_missing_freq = 5
-maxiter = 100
-# method = 'differential_evolution'
-method = 'leastsq'
+order = 16              # highest order basis polynomial
+nb_freq = 0             # number of frequencies included in fit (if 0, all resonances in file are used)
+nb_missing_freq = 5     # maximum number of missing resonances
+# maxiter = 100
+method = 'differential_evolution' # fit method: 'differential_evolution' and 'leastsq' are allowed
+# method = 'leastsq'
 
 # freqs_file = "C:\\Users\\Florian\\Box Sync\\Code\\Resonant_Ultrasound_Spectroscopy\\elastic_constants\\test\\Mn3.1Sn0.98.txt"
 freqs_file = "C:\\Users\\Florian\\Box Sync\\Code\\Resonant_Ultrasound_Spectroscopy\\elastic_constants\\examples\\Mn3.1Sn0.89_in.txt"
-mass = 0.00855e-3
-dimensions = np.array([0.935e-3, 1.010e-3, 1.231e-3+5e-6])
+mass = 0.00855e-3   # mass in kg
+dimensions = np.array([0.935e-3, 1.010e-3, 1.231e-3+5e-6]) # dimensions of sample in m
+             # first value is length along [100], second along [010], and third is along [001]
 
+# initial elastic constants in Pa
 initElasticConstants_dict = {
     'c11': 119.854e9,
     # 'c66': 45e9,
@@ -49,8 +51,8 @@ ElasticConstants_vary = {
 
 t0 = time()
 print ('initialize the class ...')
-srtio3 = ElasticSolid(initElasticConstants_dict, ElasticConstants_bounds, ElasticConstants_vary, mass, dimensions, order, nb_freq, method, freqs_file, nb_missing_freq)#, maxiter=maxiter)
+rus = ElasticSolid(initElasticConstants_dict, ElasticConstants_bounds, ElasticConstants_vary, mass, dimensions, order, nb_freq, method, freqs_file, nb_missing_freq)#, maxiter=maxiter)
 print ('class initialized in ', round(time()-t0, 4), ' s')
 
 
-srtio3.fit()
+rus.fit()

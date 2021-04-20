@@ -164,9 +164,14 @@ class ElasticConstantsTemperatureDependence:
         return idx
 
 
-    def elastic_constants(self, fint, Tint):
-
-        fht_exp, fht_calc, dlnf_dlnc = self.import_fit_result()
+    def elastic_constants(self, fint, Tint, fit_results=None):
+        if fit_results == None:
+            fht_exp, fht_calc, dlnf_dlnc = self.import_fit_result()
+        else:
+            fht_exp, fht_calc, dlnf_dlnc = fit_results
+        print(fht_exp)
+        print(fht_calc)
+        print (dlnf_dlnc)
         idx = self.find_correct_indices(fht_exp)
         
         a = dlnf_dlnc[idx]
@@ -199,8 +204,12 @@ class ElasticConstantsTemperatureDependence:
         return CofT_dict, Tint
 
 
-    def get_irreps (self, fint, Tint):
-        CofT_dict, T = self.elastic_constants(fint, Tint)
+    def get_irreps (self, fint, Tint, fit_results=None):
+        if fit_results==None:
+            CofT_dict, T = self.elastic_constants(fint, Tint)
+        else:
+            CofT_dict, T = self.elastic_constants(fint, Tint, fit_results)
+
         C_irrep = {}
         if self.crystal_structure == 'hexagonal':
             if 'c11' in self.high_T_el_const.keys():

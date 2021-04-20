@@ -214,8 +214,9 @@ ax2 = ax1.twinx()
 ax2.fill_between(t['Mn3Sn'], bulk['Mn3Sn']-bulk_error['Mn3Sn'], bulk['Mn3Sn']+bulk_error['Mn3Sn'], alpha=0.3, facecolor=colors['Mn3Sn'])
 ax2.plot(t['Mn3Sn'], bulk['Mn3Sn'], color=colors['Mn3Sn'], linewidth=lw)
 
-ax2.set_ylabel('$\\Delta$B (GPa) - Mn$_3$Sn', color=colors['Mn3Sn'], fontsize=fs, rotation=270)
+ax2.set_ylabel('$\\Delta$B (GPa) - Mn$_{3.1}$Sn$_{0.89}$', color=colors['Mn3Sn'], fontsize=fs, rotation=270)
 ax2.tick_params(axis="y",direction="in", labelsize=ls, left='False', right='True', length=4, width=1, which = 'major')
+ax2.yaxis.tick_right()
 ax2.set_ylim(Bmin_Sn, Bmax_Sn)
 ax2.yaxis.set_label_coords(1.11, 0.5)
     

@@ -234,6 +234,8 @@ class ElasticSolid:
         Gmat = np.swapaxes(Gtens, 2, 1).reshape(3*self.idx, 3*self.idx)
         return Gmat
 
+
+
     def resonance_frequencies (self, pars, nb_freq, eigvals_only=True):
         """
         calculates resonance frequencies in Hz;

@@ -13,6 +13,7 @@ crystal_structure = 'hexagonal'
 reference_temperature = 460
 # manual_indices = np.array( [1, 2, 3, 4, 5, 6, 8, 12, 16, 17, 18, 20, 19, 22, 25, 27, 29, 38, 39, 40, 41, 42, 43, 44] )
 manual_indices = np.array( [1, 2, 3, 4, 5, 6, 8, 12, 16, 17, 18, 20, 19, 22, 27, 29, 38, 39, 40, 41, 42, 43, 44] )
+manual_indices = np.array( [1, 2, 3, 4, 5, 6, 8, 12, 16, 17, 18] )
 
 # mean
 high_T_el_const = {
@@ -54,5 +55,5 @@ high_T_el_const = {
 #     # 'c66': 45.3
 # }
 
-Mn31Sn089 = ElasticConstantsTemperatureDependence(folder_path, fit_path, crystal_structure, high_T_el_const, reference_temperature, manual_indices=manual_indices)
+Mn31Sn089 = ElasticConstantsTemperatureDependence(folder_path, fit_path, crystal_structure, high_T_el_const, reference_temperature)#, manual_indices=manual_indices)
 Mn31Sn089.do_everything()
