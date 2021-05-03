@@ -14,41 +14,46 @@ from elastic_solid.elasticsolid import ElasticSolid
 #########################################################################################################################################################
 #########################################################################################################################################################
 
-order = 10             # highest order basis polynomial
+order = 12             # highest order basis polynomial
 nb_freq = 0             # number of frequencies included in fit (if 0, all resonances in file are used)
 nb_missing_freq = 5     # maximum number of missing resonances
 crystal_structure = 'hexagonal'
-reference_temperature = 460
+reference_temperature = 435
 
 
-freqs_file = "C:\\Users\\Florian\\Box Sync\\Code\\Resonant_Ultrasound_Spectroscopy\\elastic_constants\\examples\\Mn3.1Sn0.89_in.txt"
-folder_path = "C:\\Users\\Florian\\Box Sync\\Projects\\Mn3X\\Mn3.1Sn0.89\\RUS\\2010A\\good_data"
-mass = 0.00855e-3   # mass in kg
+# freqs_file = "C:\\Users\\Florian\\Box Sync\\Code\\Resonant_Ultrasound_Spectroscopy\\elastic_constants\\examples\\Mn3.1Sn0.89_in.txt"
+# folder_path = "C:\\Users\\Florian\\Box Sync\\Projects\\Mn3X\\Mn3.1Sn0.89\\RUS\\2010A\\good_data"
+freqs_file = "C:\\Users\\Florian\\Box Sync\\Projects\\Mn3X\\Mn3Ge\\RUS\\Mn3Ge_2103B\\high_temperature_scan\\210329\\Mn3Ge_2103B.txt"
+folder_path = "C:\\Users\\Florian\\Box Sync\\Projects\\Mn3X\\Mn3Ge\\RUS\\Mn3Ge_2103B\\good_data"
+# mass = 0.00855e-3   # mass in kg #
+mass = 4.7086e-6   # mass in kg
+
+# manual_indices = np.array( [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 36, 40, 41, 42] ) # for Mn3Ge 2001B
 
 dimensions = [
-    np.array([0.935e-3, 1.010e-3, 1.231e-3]),
-    np.array([0.935e-3, 1.010e-3, 1.231e-3+5e-6]),
-    np.array([0.935e-3, 1.010e-3+5e-6, 1.231e-3]),
-    np.array([0.935e-3+5e-6, 1.010e-3, 1.231e-3])
+    np.array([0.823e-3, 0.741e-3, 1.052e-3]),
+    np.array([0.823e-3+5e-6, 0.741e-3, 1.052e-3]),
+    np.array([0.823e-3, 0.741e-3+5e-6, 1.052e-3]),
+    np.array([0.823e-3, 0.741e-3, 1.052e-3+5e-6])
     ] # dimensions of sample in m
 
 # initial elastic constants in Pa
 initElasticConstants_dict = {
-    'c11': 119.854e9,
+    'c11': 140.077e9,
     # 'c66': 45e9,
-    'c12': 28.058e9,
-    'c13': 14.273e9,
-    'c33': 142.826e9,
-    'c44': 44.006e9
+    'c12': 44.778e9,
+    'c13': 17.387e9,
+    'c33': 194.724e9,
+    'c44': 44.404e9
     }
         
 ElasticConstants_bounds = {
-    'c11': [110e9, 140e9],
+    'c11': [130e9, 150e9],
     # 'c66': [30e9, 60e9],
-    'c12': [20e9, 40e9],
-    'c13': [0, 30e9],
-    'c33': [125e9, 155e9],
-    'c44': [30e9, 60e9]
+    'c12': [30e9, 50e9],
+    'c13': [5e9, 25e9],
+    'c33': [185e9, 205e9],
+    'c44': [35e9, 55e9]
     }
         
 ElasticConstants_vary = {
@@ -96,8 +101,8 @@ def temp_dep (initial_conditions, bounds, vary, mass, dimensions, order):
 
     high_T_C, fht_exp, fht_calc, log_der = fit (initial_conditions, bounds, vary, mass, dimensions, order)
 
-    analysis = ElasticConstantsTemperatureDependence(folder_path, freqs_file, crystal_structure, high_T_C, reference_temperature)
-    Tint, fint, gint = analysis.interpolate()
+    analysis = ElasticConstantsTemperatureDependence(folder_path, freqs_file, crystal_structure, high_T_C, reference_temperature)#, manual_indices=manual_indices)
+    Tint, fint, _ = analysis.interpolate()
     C_irrep, dC_irrep, T = analysis.get_irreps (fint, Tint, fit_results=[fht_exp, fht_calc, log_der])
 
     # analysis.plot_irreps (dC_irrep, T, '$\\Delta \\mathrm{c}$ (GPa) ')
@@ -107,7 +112,7 @@ def temp_dep (initial_conditions, bounds, vary, mass, dimensions, order):
 
 
 #########################################################################################################################################################
-# run loops
+# run loops to calculate errors
 #########################################################################################################################################################
 
 C = []
@@ -141,12 +146,35 @@ irreps = ['A1g1', 'A1g2', 'A1g3']
 plt.figure()
 for irrep in irreps:
     plt.fill_between(Treal, dCreal[irrep]-Cerror[irrep], dCreal[irrep]+Cerror[irrep], alpha=0.3)
-    plt.plot(Treal, dCreal[irrep])
+    plt.plot(Treal, dCreal[irrep], label=irrep)
+plt.legend()
 
 irreps = ['E1g', 'E2g']
 plt.figure()
 for irrep in irreps:
     plt.fill_between(Treal, dCreal[irrep]-Cerror[irrep], dCreal[irrep]+Cerror[irrep], alpha=0.3)
-    plt.plot(Treal, dCreal[irrep])
+    plt.plot(Treal, dCreal[irrep], label=irrep)
+plt.legend()
+
+
+
+#########################################################################################################################################################
+# save data
+#########################################################################################################################################################
+
+for irrep in dCreal:
+    dCreal[irrep] = list ( dCreal[irrep] )
+    Cerror[irrep] = list ( Cerror[irrep] )
+
+
+save = {
+    'Temperature': list(Treal),
+    'elastic constants': dCreal,
+    'error': Cerror}
+save_path = folder_path + '\\irreps_with_T_incl_error.json'
+with open(save_path, 'w') as f:
+            json.dump(save, f, indent=4)
+
+
 
 plt.show()

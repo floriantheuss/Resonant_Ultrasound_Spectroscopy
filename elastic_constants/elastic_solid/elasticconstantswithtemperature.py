@@ -14,6 +14,7 @@ class ElasticConstantsTemperatureDependence:
     def __init__(self, resonances_folder_path, fit_path, crystal_structure, high_T_el_const, reference_temperature, manual_indices=[]):
         '''
         folder_path: folder where all the individual files containing temperature dependeces of resonance frequencies are stored
+        fit_path: filepath of the _out file which contains the high temperature fit (i.e. the logarithmic derivatives)
         '''
 
         # initialize attributes
@@ -35,7 +36,7 @@ class ElasticConstantsTemperatureDependence:
         for file in self.filenames:
             T, f, g = self.import_data(file)
             self.temperature_raw.append(T)
-            self.frequency_raw.append(f/1e3) # in MHz
+            self.frequency_raw.append(f/1e3) # Arkady's labview gives frequencies in kHz; here they are converted to MHz to match the units of the fit_path file
             self.gamma_raw.append(g)
 
         # import fit result
@@ -252,7 +253,7 @@ class ElasticConstantsTemperatureDependence:
 
     def plot_data (self, fint, Tint):
         plt.figure()
-        for ii, f in enumerate(fint):
+        for ii, _ in enumerate(fint):
             # plt.scatter(self.temperature_raw[ii], self.frequency_raw[ii])
             plt.plot(self.temperature_raw[ii], self.frequency_raw[ii], 'o-')
             # plt.plot(Tint[ii], (f-max(f))/(max(f)-min(f)) + ii)
@@ -286,7 +287,7 @@ class ElasticConstantsTemperatureDependence:
     
 
     def do_everything (self):
-        Tint, fint, gint = self.interpolate()
+        Tint, fint, _ = self.interpolate()
         C_irrep, dC_irrep, T = self.get_irreps(fint, Tint)
 
         self.save_data(C_irrep, T, self.fit_path[:-4]+'_elastic_constants.json')

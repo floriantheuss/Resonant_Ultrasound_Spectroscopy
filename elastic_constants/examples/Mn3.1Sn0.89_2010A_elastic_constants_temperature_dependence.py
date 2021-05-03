@@ -25,35 +25,6 @@ high_T_el_const = {
     # 'c66': 45.3
 }
 
-# # error 1
-# high_T_el_const = {
-#     'c11': 120.049e9,
-#     'c12': 28.734e9,
-#     'c13': 13.557e9,
-#     'c33': 141.634e9,
-#     'c44': 43.74e9
-#     # 'c66': 45.3
-# }
-
-# # error 3
-# high_T_el_const = {
-#     'c11': 119.558e9,
-#     'c12': 28.166e9,
-#     'c13': 13.791e9,
-#     'c33': 141.851e9,
-#     'c44': 43.847e9
-#     # 'c66': 45.3
-# }
-
-# # error 5
-# high_T_el_const = {
-#     'c11': 119.037e9,
-#     'c12': 27.978,
-#     'c13': 13.912e9,
-#     'c33': 143.327e9,
-#     'c44': 43.963e9
-#     # 'c66': 45.3
-# }
 
 Mn31Sn089 = ElasticConstantsTemperatureDependence(folder_path, fit_path, crystal_structure, high_T_el_const, reference_temperature)#, manual_indices=manual_indices)
 Mn31Sn089.do_everything()

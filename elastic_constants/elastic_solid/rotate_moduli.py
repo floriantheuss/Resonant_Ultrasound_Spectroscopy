@@ -99,7 +99,7 @@ def to_Voigt (ctens):
 
 
 
-def rotatation_matrix (alpha, beta, gamma):
+def rotation_matrix (alpha, beta, gamma):
     """
     define general 3D rotation matrix with rotation angles alpha, beta, gamma about x, y, z 
     axes respectively;
@@ -120,7 +120,7 @@ def rotate_ctens (alpha, beta, gamma, ctens):
     takes angles alpha, beta, gamma and an elastic tensor and returns the rotated elastic tensor
     """
     crot =  np.zeros([3,3,3,3])
-    R = rotatation_matrix (alpha, beta, gamma)
+    R = rotation_matrix (alpha, beta, gamma)
     for i in np.arange(3):
         for j in np.arange(3):
             for k in np.arange(3):

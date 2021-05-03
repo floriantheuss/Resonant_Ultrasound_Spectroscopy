@@ -12,11 +12,9 @@ maxiter = 100
 # method = 'differential_evolution'
 method = 'leastsq'
 
-# freqs_file = "C:\\Users\\Florian\\Box Sync\\Code\\Resonant_Ultrasound_Spectroscopy\\elastic_constants\\examples\\Mn3Ge_in.txt"
 freqs_file = "C:\\Users\\Florian\\Box Sync\\Code\\Resonant_Ultrasound_Spectroscopy\\elastic_constants\\examples\\Mn3Ge_2103B.txt"
-# mass = 0.0089e-3 #2010A
+
 mass = 0.0089e-3/(0.911*1.020*1.305)*(0.823*0.741*1.052) #2103B
-# dimensions = np.array([0.911e-3, 1.020e-3, 1.305e-3]) #2010A
 dimensions = np.array([0.823e-3, 0.741e-3, 1.052e-3]) #2103B
 
 initElasticConstants_dict = {
