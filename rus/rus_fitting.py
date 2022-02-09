@@ -44,8 +44,9 @@ class RUSFitting:
         
 
         ## Load data
-        self.nb_freqs        = nb_freqs
-        self.nb_missing      = nb_missing
+        self.nb_freqs           = nb_freqs
+        self.nb_missing         = nb_missing
+        self.rus_object.nb_freq = nb_freqs + nb_missing
         self.freqs_file      = freqs_file
         self.col_freqs       = 0
         self.col_weight      = 1
@@ -179,19 +180,19 @@ class RUSFitting:
         self.best_freqs_missing = freqs_missing
         self.best_index_missing = index_missing
 
+        # this is what we want to be minimized
+        diff = (self.best_freqs_found - self.freqs_data) * self.weight
+        self.rms = np.sqrt(np.sum(((diff[diff!=0]/self.freqs_data[diff!=0]))**2) / len(diff[diff!=0])) * 100
+
         print ('NUMBER OF GENERATIONS: ', self.nb_gens)
         print ('BEST PARAMETERS:')
         for key, item in self.best_pars.items():
             print ('\t',key, ': ', round(item, 5))
-        print ('MISSING FREQUENCIES: ', freqs_missing[freqs_missing<max(self.freqs_data)])
+        print ('MISSING FREQUENCIES: ', freqs_missing[index_missing<len(self.freqs_data)])
+        print ('RMS: ', round(self.rms, 5), ' %')
         print ('')
         print ('#', 50*'-')
-        print ('')
-        
-        # this is what we want to be minimized
-        diff = (self.best_freqs_found - self.freqs_data) * self.weight
-
-        self.rms = np.sqrt(np.sum((diff[diff!=0])**2) / len(diff[diff!=0]))
+        print ('')       
         
         return diff
 
@@ -243,9 +244,7 @@ class RUSFitting:
         else:
             report = self.report_total()
             print(report)
-
         self.save_report(report)
-
         return self.rus_object
 
     # the following methods are just to display the fit report and data in a nice way
