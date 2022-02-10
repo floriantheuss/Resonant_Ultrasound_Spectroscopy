@@ -181,8 +181,8 @@ class RUSFitting:
         self.best_index_missing = index_missing
 
         # this is what we want to be minimized
-        diff = (self.best_freqs_found - self.freqs_data) * self.weight
-        self.rms = np.sqrt(np.sum(((diff[diff!=0]/self.freqs_data[diff!=0]))**2) / len(diff[diff!=0])) * 100
+        diff = (self.best_freqs_found - self.freqs_data) / self.best_freqs_found * self.weight
+        self.rms = np.sqrt(np.sum((diff[diff!=0])**2) / len(diff[diff!=0])) * 100
 
         print ('NUMBER OF GENERATIONS: ', self.nb_gens)
         print ('BEST PARAMETERS:')
@@ -283,6 +283,7 @@ class RUSFitting:
         reduced_chi2 = chi2 / (N_points - N_variables)
         report = "#Fit Statistics" + '-'*(65) + '\n'
         report+= "\t# fitting method     \t= " + self.method + "\n"
+        report+= "\t# polish             \t= " + str(self.polish) + "\n"
         report+= "\t# data points        \t= " + str(N_points) + "\n"
         report+= "\t# variables          \t= " + str(N_variables) + "\n"
         report+= "\t# fit success        \t= " + str(fit_output.success) + "\n"
@@ -353,6 +354,7 @@ class RUSFitting:
             sample_text += '# ' + sample_template.format(*['resonance frequencies calculated with:', 'RUS_RPR']) + '\n'
         if isinstance(self.rus_object, RUSComsol):
             sample_text += '# ' + sample_template.format(*['Comsol file:', self.rus_object.mph_file]) + '\n'
+            sample_text += '# ' + sample_template.format(*['density (kg/m^3):', self.rus_object.density]) + '\n'
             sample_text += '# ' + sample_template.format(*['resonance frequencies calculated with:', 'Comsol']) + '\n'
         return sample_text
 
