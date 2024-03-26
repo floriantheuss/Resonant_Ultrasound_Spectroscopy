@@ -1,9 +1,0 @@
-# Ignore everything in this directory
-*
-# Except this file
-!.gitignore
-!elastic_constants.py
-!format_Resonances_for_fit.py
-!rus_comsol.py
-!rus_rpr.py
-!rus_fitting.py
