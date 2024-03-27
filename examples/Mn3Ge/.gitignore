@@ -1,7 +1,0 @@
-# Ignore everything in this directory
-*
-# Except this file
-!.gitignore
-!format_resonances_for_fit.py
-!new_Mn3Ge_2001B_elastic_constants_fit.py
-!new_Mn3Ge_2001B_in_for_fit.dat

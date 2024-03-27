@@ -171,7 +171,7 @@ class ElasticConstantsTemperatureDependence:
         return fht_exp, fht_calc, dlnf_dlnc
 
 
-    def find_correct_indices (self, fht_exp):
+    def find_correct_indices (self, fht_exp, print_indices=True):
         if len(self.manual_indices) == 0:
             # idx = np.zeros(len(self.temperature_raw))
             idx_list   = []
@@ -190,7 +190,8 @@ class ElasticConstantsTemperatureDependence:
                 else:
                     f_compare = np.zeros_like(f_compare)
             idx = np.array(idx_list)
-            print(idx)
+            if print_indices:
+                print(idx)
         else:
             idx = self.manual_indices
             f_ref_list = []
@@ -204,13 +205,14 @@ class ElasticConstantsTemperatureDependence:
         else:
             nb = max(idx)+3
         jj = 0
-        for ii in np.arange(nb):
-            if ii in idx:
-                print (ii, fht_exp[ii], f_ref_list[jj])
-                jj+=1
-            else:
-                print (ii, fht_exp[ii])
-        
+        if print_indices:
+            for ii in np.arange(nb):
+                if ii in idx:
+                    print (ii, fht_exp[ii], f_ref_list[jj])
+                    jj+=1
+                else:
+                    print (ii, fht_exp[ii])
+
         return np.array(idx)
 
 
