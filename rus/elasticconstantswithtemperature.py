@@ -165,9 +165,9 @@ class ElasticConstantsTemperatureDependence:
         fht_calc = data[:, 2]
         # logarithmic derivatives
         dlnf_dlnc = data[:, -len(self.high_T_el_const):]
-        print()
-        print(np.shape(dlnf_dlnc))
-        print()
+        # print()
+        # print(np.shape(dlnf_dlnc))
+        # print()
         return fht_exp, fht_calc, dlnf_dlnc
 
 
