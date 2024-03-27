@@ -409,13 +409,19 @@ class ElasticConstantsTemperatureDependence:
 
 
     def get_dcoc (self, Tint, fint, fit_path, method, fit_path_uncertainty=None):
+        if fit_path_uncertainty is not None:
+            print_indices = False
+        else:
+            print_indices = True
+
         fht_exp, fht_calc, dlnf_dlnc = self.import_fit_result(fit_path)
-        idx                          = self.find_correct_indices(fht_exp)
+        idx                          = self.find_correct_indices(fht_exp, print_indices=print_indices)
+        
         if fit_path_uncertainty is not None:
             _, _, dlnf_dlnc = self.import_fit_result(fit_path_uncertainty)
-
+     
         if method == 'LinearAlgebra':
-            dcoc_dict, CofT_dict, T = self.elastic_constants_LA(fint, Tint, idx, fht_exp, dlnf_dlnc)
+            dcoc_dict, CofT_dict, T = self.elastic_constants_LA(fint, Tint, idx, fht_exp, dlnf_dlnc, print_output=print_indices)
         elif method == 'leastsq':
             dcoc_dict, CofT_dict, T = self.elastic_constants_leastsq(fint, Tint, idx, fht_exp, dlnf_dlnc)
         else:
